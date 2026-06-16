@@ -1,0 +1,8 @@
+# Compiled binaries
+/iot-app
+
+# Build artifacts / OCI tars
+*.tar
+
+# OS / editor artifacts
+.DS_Store

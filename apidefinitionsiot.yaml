@@ -1,0 +1,4199 @@
+swagger: "2.0"
+info:
+  title: "IoT Operations Partner API"
+  description: "This is REST API definition for 3rd party containers running in Aruba IoT Gateway.\n\nThe container can read below environment variables to use the APIs:\n   | Environment Variable | Description                              | Example                       |\n   |----------------------|------------------------------------------|-------------------------------|\n   | APIGW_URL            | URL of the API Gateway                   | apigw.iot-gateway.svc         |\n   | APIKEY               | API key of Partner API                   | 6509461705ff704a6fa56d6b-0-1  |\n   | GATEWAY_ID           | ID of the data collector                 | 3326352892534583468           |\n   | GATEWAY_IP           | IP of the data collector                 | 10.48.3.35                    |\n   | GATEWAY_NAME         | Name of the data collector               | qa-scale-32                   |\n   | APP_WRITABLE_DIR     | The writable directory                   | /home/app/data                |\n   | APP_CERT_DIR         | The directory with uploaded certificates | /home/app/iotops-server-certs |\n   | APP_PV_DIR           | The persistent volume directory          | /home/app/pv                  |\n\nWhat is Hardware ID of each device type?\n- BLE: 6 bytes MAC address like \"aa:bb:cc:dd:ee:ff\"\n- Zigbee: 8 bytes MAC address like \"aa:bb:cc:dd:ee:ff:11:22\"\n- USB: AP generated global unique random identifier like \"c133a5075e35dd97bc25b75893c675b1\"\n- Secondary: N/A, device ID only\n\nFor device API with \"id\" parameter in URL path, it is \"Hardware ID\" by default.\nThere are two optional query parameters:\n- idType: ID_TYPE_HARDWARE_ID (default) or ID_TYPE_DEVICE_ID\n- deviceClass: required when idType is ID_TYPE_DEVICE_ID\n\nMost of APIs are using normal HTTP synchronous methods and respond a single result in JSON format. But some of them need to respond multiple asynchronous results and use HTTP JSON stream. Below is the list of APIs:\n- PUT /ble/cmd/connect: device connect\n- GET /ble/cmd/gattnotify: GATT notification\n- GET /ble/cmd/gattindicate: GATT indication\n\nNote:\n1. The mac in BLE devices is 6 bytes while in Zigbee is 8 bytes.\n2. The string(byte) means base64 encoded string in json.\n\nAll APIs are using normal HTTP status code. Below is the complete list of error responses:\n| Status Code | Description         | Reason                                                     | Handle                                                                 |\n| ----------- | ------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- |\n| 400         | InvalidArgument     | Arguments in URL or request body is invalid.               | Check request parameters.                                              |\n| 401         | Unauthenticated     | The credentials are invalid.                               | Check API key.                                                         |\n| 403         | PermissionDenied    | You do not have permission to access this API.             | Check API permission.                                                  |\n| 404         | NotFound            | The resource does not exist. Or spelling mistakes in URL.  | Check URL and resource ID.                                             |\n| 409         | AlreadyExists       | The resource you are trying to create has already existed. | Check resource ID.                                                     |\n| 500         | Unknown or Internal | Error occurred inside the server.                          | Retry after some time. Or report bug to Aruba with the error messages. |\n| 503         | Unavailable         | The sever is starting or restarting.                       | Retry after some time. Or report bug to Aruba with the error messages. |\n| 504         | DeadlineExceeded    | The network issue or other environment fault occurred.     | Retry after some time. Or report bug to Aruba with the error messages. |"
+  version: '3.1'
+  contact:
+    name: "Aruba iotops team"
+    email: "wei.huang@hpe.com"
+schemes:
+- "http"
+consumes:
+- "application/json"
+produces:
+- "application/json"
+paths:
+  /api/v3/apps/info:
+    post:
+      summary: "Send app info"
+      description: "Send app info\nRequired scope: context; permission: readonly"
+      operationId: "AppManagerService_SendAppInfo"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3SendAppInfoResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "body"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/apiv3SendAppInfoRequest"
+      tags:
+      - "App"
+  /api/v3/aps:
+    get:
+      summary: "Get AP list"
+      description: "Required scope: context; permission: readonly"
+      operationId: "IngestionService_GetAPs"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetAPsResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      tags:
+      - "Infra"
+  /api/v3/aps/{apMac}:
+    get:
+      summary: "Get AP detailed info"
+      description: "Required scope: context; permission: readonly"
+      operationId: "IngestionService_GetAPInfo"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetAPInfoResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "apMac"
+        in: "path"
+        required: true
+        type: "string"
+      tags:
+      - "Infra"
+  /api/v3/beacon/{radioMac}:
+    post:
+      summary: "Set beacon config"
+      description: "Set beacon config to the radio.\nRequired scope: beacon; permission: readwrite."
+      operationId: "IngestionService_SetBeaconConfig"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3SetBeaconConfigResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "radioMac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "body"
+        in: "body"
+        required: true
+        schema:
+          type: "object"
+          properties:
+            apMac:
+              type: "string"
+            beaconConfig:
+              $ref: "#/definitions/apiv3BeaconConfig"
+      tags:
+      - "Infra"
+  /api/v3/ble/cmd/authentication/{id}:
+    post:
+      summary: "BLE GATT Authentication"
+      description: "BLE GATT Authentication.\n\nRequired scope: gatt; permission: readwrite\n\nThis API will do authentication after gatt connection established."
+      operationId: "CmdGatewayService_GattAuthentication"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattAuthenticationResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "authenticationData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/GattAuthenticationRequestAuthenticationData"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/cmd/connect/{id}:
+    delete:
+      summary: "BLE GATT Disconnect"
+      description: "BLE GATT Disconnect. Required scope: gatt; permission: readonly"
+      operationId: "CmdGatewayService_GattDisconnect"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattDisconnectResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      tags:
+      - "BLE GATT"
+    put:
+      summary: "BLE GATT Connect"
+      description: "BLE GATT Connect. Required scope: gatt; permission: readonly\n\nThe call to this API is suggested to be open during the device connection lifecycle in order to receive continuous device status message.\n\nThe response of the API will be:\n1. actionResult if connection to device succeeded or failed.\n2. The Service and Characteristic Discovery result.\n3. Device status update like disconnected or MTU update.\n\nThis API uses JSON stream.\nMinInterval, maxInterval, slaveLatency and supervisionTimeout parameters must be provided together."
+      operationId: "CmdGatewayService_GattConnect"
+      responses:
+        "200":
+          description: "A successful response.(streaming responses)"
+          schema:
+            type: "object"
+            properties:
+              result:
+                $ref: "#/definitions/v3GattConnectResponse"
+              error:
+                $ref: "#/definitions/rpcStatus"
+            title: "Stream result of v3GattConnectResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "apMac"
+        description: "specific AP mac"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "skipDiscovery"
+        description: "skip discovery"
+        in: "query"
+        required: false
+        type: "boolean"
+      - name: "minInterval"
+        description: "Minimum connection interval permitted: [6, 3200] in units of 1.25 ms\n minium: 6,\n maximum: 3200."
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      - name: "maxInterval"
+        description: "Maximum connection interval permitted: [6, 3200] in units of 1.25 ms\n minium: 6,\n maximum: 3200."
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      - name: "slaveLatency"
+        description: "Slave latency permitted, in connection events: [0, 500)\n minium: 0,\n maximum: 499."
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      - name: "supervisionTimeout"
+        description: "Supervision timeout permitted: [10, 3200] in units of 10 ms\n minium: 10,\n maximum: 3200."
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/cmd/encryption/{id}:
+    put:
+      summary: "BLE GATT Encryption"
+      description: "BLE GATT Encryption.\n\nRequired scope: gatt; permission: readwrite\n\nThis API will use the bondingKey to encrypt the data of gatt connection."
+      operationId: "CmdGatewayService_GattEncryption"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattEncryptionResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "encryptionData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/GattEncryptionRequestEncryptionData"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/cmd/gatt/{id}:
+    get:
+      summary: "BLE GATT Read"
+      description: "BLE GATT Read. Required scope: gatt; permission: readonly\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattRead"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattReadResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+    post:
+      summary: "BLE GATT Write"
+      description: "BLE GATT Write. Required scope: gatt; permission: readwrite\nBy default, GATT write with response\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattWrite"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattWriteResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "value"
+        description: "value to write"
+        in: "body"
+        required: true
+        schema:
+          type: "string"
+          format: "byte"
+          example: "YgAAAAAA"
+          required:
+          - "value"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "withoutresponse"
+        description: "GATT write without response"
+        in: "query"
+        required: false
+        type: "boolean"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/cmd/gattatomic/{id}:
+    get:
+      summary: "BLE GATT AtomicRead"
+      description: "BLE GATT AtomicRead. Required scope: gatt; permission: readonly\n\nsimple REST api that return the value of a GATT characteristic (equivalent to connect-gattRead-disconnect)\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattAtomicRead"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattAtomicReadResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "apMac"
+        description: "specific AP mac"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+    post:
+      summary: "BLE GATT AtomicWrite"
+      description: "BLE GATT AtomicWrite. Required scope: gatt; permission: readwrite\n\nsimple REST api that writes a value to a GATT characteristic (equivalent to connect-gattWrite-disconnect)\nEither svcid/charid or valuehandle parameters must be provided.\nBy default, GATT write with response"
+      operationId: "CmdGatewayService_GattAtomicWrite"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattAtomicWriteResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "value"
+        description: "value to write"
+        in: "body"
+        required: true
+        schema:
+          type: "string"
+          format: "byte"
+          example: "YgAAAAAA"
+          required:
+          - "value"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "withoutresponse"
+        description: "GATT write without response"
+        in: "query"
+        required: false
+        type: "boolean"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "apMac"
+        description: "specific AP mac"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/cmd/gattindicate/{id}:
+    get:
+      summary: "BLE GATT Indication Receiver"
+      description: "BLE GATT Get Indication results. Required scope: gatt; permission: readonly.\n\nThis API uses JSON stream. It only stops if the device is disconnected.\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattIndicateReceive"
+      responses:
+        "200":
+          description: "A successful response.(streaming responses)"
+          schema:
+            type: "object"
+            properties:
+              result:
+                $ref: "#/definitions/v3GattIndicateReceiveResponse"
+              error:
+                $ref: "#/definitions/rpcStatus"
+            title: "Stream result of v3GattIndicateReceiveResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+    delete:
+      summary: "BLE GATT Indication Unsubscribe"
+      description: "BLE GATT Indication Unsubscribe. Required scope: gatt; permission: readonly\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattIndicateUnsubscribe"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattIndicateUnsubscribeResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+    put:
+      summary: "BLE GATT Indication Subscribe"
+      description: "BLE GATT Indication Subscribe. Required scope: gatt; permission: readonly\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattIndicateSubscribe"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattIndicateSubscribeResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/cmd/gattnotify/{id}:
+    get:
+      summary: "BLE GATT Notify Receiver"
+      description: "BLE GATT Get notification results. Required scope: gatt; permission: readonly.\n\nEither svcid/charid or valuehandle parameters must be provided.\nThis API uses JSON stream. It only stops if the device is disconnected."
+      operationId: "CmdGatewayService_GattNotifyReceive"
+      responses:
+        "200":
+          description: "A successful response.(streaming responses)"
+          schema:
+            type: "object"
+            properties:
+              result:
+                $ref: "#/definitions/v3GattNotifyReceiveResponse"
+              error:
+                $ref: "#/definitions/rpcStatus"
+            title: "Stream result of v3GattNotifyReceiveResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+    delete:
+      summary: "BLE GATT Notify Unsubscribe"
+      description: "BLE GATT Notify Unsubscribe. Required scope: gatt; permission: readonly\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattNotifyUnsubscribe"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattNotifyUnsubscribeResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+    put:
+      summary: "BLE GATT Notify Subscribe"
+      description: "BLE GATT Notify Subscribe. Required scope: gatt; permission: readonly\nEither svcid/charid or valuehandle parameters must be provided."
+      operationId: "CmdGatewayService_GattNotifySubscribe"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattNotifySubscribeResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "svcid"
+        description: "service uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "charid"
+        description: "characteristic uuid (in hex format)"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "valueHandle"
+        description: "value handle"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int64"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/cmd/luascript/{id}:
+    post:
+      summary: "BLE GATT ExecuteLuaScript"
+      description: "BLE GATT ExecuteLuaScript.\n\nRequired scope: script; permission: readwrite\n\nThis API will execute operations in the Lua script and returns the result. It can be seen as an advanced /gattatomic API."
+      operationId: "CmdGatewayService_GattLuaScript"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GattLuaScriptResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "device mac"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "script"
+        description: "script (encoded in base64)"
+        in: "body"
+        required: true
+        schema:
+          type: "string"
+          format: "byte"
+          required:
+          - "script"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      - name: "timeout"
+        description: "AP air-time timeout in seconds; default: 15"
+        in: "query"
+        required: false
+        type: "integer"
+        format: "int32"
+      - name: "apMac"
+        description: "specific AP mac"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "BLE GATT"
+  /api/v3/ble/devices:
+    get:
+      summary: "Get BLE device list"
+      description: "get all ble devices\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetBLEDeviceList"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetBLEDeviceListResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      tags:
+      - "BLE"
+  /api/v3/ble/devices/{id}:
+    get:
+      summary: "Get BLE device data"
+      description: "Get BLE device data including device id and uuid, the difference between v3 and earlier version is that\nv3 api support getting multi device class and associated device id, earlier version only have one device id.\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetBleDeviceData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3GetBleDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "BLE"
+  /api/v3/ble/devices/{id}/data:
+    put:
+      summary: "Update BLE device data"
+      description: "update Ble device data\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateBLEDeviceData2"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateBLEDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "updateInfo"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/apiv3DeviceDataUpdateInfo"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "BLE"
+    patch:
+      summary: "Update BLE device data"
+      description: "update Ble device data\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateBLEDeviceData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateBLEDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "updateInfo"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/apiv3DeviceDataUpdateInfo"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "BLE"
+  /api/v3/ble/devices/{id}/deviceclass:
+    put:
+      summary: "Update BLE device class"
+      description: "update BLE device class\nRequired scope: context; permission: classify"
+      operationId: "DeviceContextService_UpdateBLEDeviceClass"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateBLEDeviceClassResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClass"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3UpdateBLEDeviceClassRequestDeviceClassArray"
+      tags:
+      - "BLE"
+  /api/v3/ble/devices/{id}/deviceid:
+    put:
+      summary: "Set BLE device id"
+      description: "Set BLE device id based on hardware id and device class\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_SetBleDeviceId"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SetBleDeviceIdResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClassScope"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v1DeviceClassScopedData"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "BLE"
+  /api/v3/ble/stream/packets:
+    get:
+      summary: "Subscribe BLE packet stream"
+      description: "Subscribe BLE packet stream filtered by the matching mechanisms declared in AppBundle."
+      operationId: "IngestionService_SubscribeBLEPacketStream"
+      responses:
+        "200":
+          description: "A successful response.(streaming responses)"
+          schema:
+            type: "object"
+            properties:
+              result:
+                $ref: "#/definitions/v3SubscribeBLEPacketStreamResponse"
+              error:
+                $ref: "#/definitions/rpcStatus"
+            title: "Stream result of v3SubscribeBLEPacketStreamResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "fields"
+        description: "Additional fields in northbound messages. Currently only support `DeviceClass`"
+        in: "query"
+        required: false
+        type: "array"
+        items:
+          type: "string"
+        collectionFormat: "multi"
+      tags:
+      - "BLE"
+  /api/v3/radios:
+    get:
+      summary: "Get Radio list"
+      description: "Required scope: context; permission: readonly"
+      operationId: "IngestionService_GetRadios"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetRadiosResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "firmwareType"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "FIRMWARE_TYPE_ARUBA"
+        - "FIRMWARE_TYPE_SDR"
+      tags:
+      - "Infra"
+  /api/v3/radios/{id}:
+    get:
+      summary: "Get Radio detail info"
+      description: "Required scope: context; permission: readonly"
+      operationId: "IngestionService_GetRadioDetail"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetRadioDetailResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "radioIdType"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "RADIO_ID_TYPE_MAC"
+      tags:
+      - "Infra"
+  /api/v3/sdr/radios/{id}/packets:
+    post:
+      summary: "Send SDR southbound data"
+      description: "Send SDR southbound data.\nRequired scope: sdr; permission: readwrite."
+      operationId: "IngestionService_SendSDRSouthboundData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SendSDRSouthboundDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "Radio ID"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "southboundData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3SendSDRSouthboundDataRequestSouthboundData"
+      - name: "radioIdType"
+        description: "Type of id"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "RADIO_ID_TYPE_MAC"
+      tags:
+      - "SDR"
+  /api/v3/sdr/stream/packets:
+    get:
+      summary: "Subscribe SDR packet stream"
+      description: "Subscribe SDR packet stream filtered by the matching mechanisms declared in AppBundle."
+      operationId: "IngestionService_SubscribeSDRPacketStream"
+      responses:
+        "200":
+          description: "A successful response.(streaming responses)"
+          schema:
+            type: "object"
+            properties:
+              result:
+                $ref: "#/definitions/v3SubscribeSDRPacketStreamResponse"
+              error:
+                $ref: "#/definitions/rpcStatus"
+            title: "Stream result of v3SubscribeSDRPacketStreamResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "fields"
+        description: "Additional fields in northbound messages. Currently only support `DeviceClass`"
+        in: "query"
+        required: false
+        type: "array"
+        items:
+          type: "string"
+        collectionFormat: "multi"
+      tags:
+      - "SDR"
+  /api/v3/secondary/devices:
+    get:
+      summary: "Get Secondary device list"
+      description: "Get all secondary device.\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetSecondaryDeviceList"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetSecondaryDeviceListResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      tags:
+      - "Secondary"
+    post:
+      summary: "Create secondary device"
+      description: "Create secondary device.\nRequired scope: context; permission: readwrite, device classify"
+      operationId: "DeviceContextService_CreateSecondaryDevice"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3CreateSecondaryDeviceResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "deviceData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3CreateSecondaryDeviceRequestSecondaryDeviceMetaData"
+      tags:
+      - "Secondary"
+  /api/v3/secondary/devices/{id}:
+    get:
+      summary: "Get secondary device"
+      description: "Get secondary device detail.\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetSecondaryDevice"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetSecondaryDeviceResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Secondary"
+    delete:
+      summary: "Delete secondary device"
+      description: "Delete secondary device.\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_DeleteSecondaryDevice"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3DeleteSecondaryDeviceResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Secondary"
+    patch:
+      summary: "Update secondary device"
+      description: "Update secondary device.\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateSecondaryDevice"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3UpdateSecondaryDeviceResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3UpdateSecondaryDeviceRequestSecondaryDeviceMetaData"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Secondary"
+  /api/v3/secondary/devices/{id}/data:
+    patch:
+      summary: "Update secondary device data"
+      description: "Update secondary device data.\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateSecondaryDeviceData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3UpdateSecondaryDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/UpdateSecondaryDeviceDataRequestSecondaryDeviceData"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Secondary"
+  /api/v3/secondary/devices/{id}/parents/{parentId}:
+    delete:
+      summary: "Delete secondary device parent"
+      description: "Delete secondary device parent.\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_DeleteSecondaryDeviceParent"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3DeleteSecondaryDeviceParentResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "parentId"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Secondary"
+  /api/v3/usb/devices:
+    get:
+      summary: "Get USB device list"
+      description: "get all USB devices\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetUSBDeviceList"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetUSBDeviceListResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      tags:
+      - "USB"
+  /api/v3/usb/devices/{id}:
+    get:
+      summary: "Get USB device data"
+      description: "Get USB device data including device id and uuid, the difference between v3 and earlier version is that\nv3 api support getting multi device class and associated device id, earlier version only have one device id.\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetUsbDeviceData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetUsbDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "USB"
+  /api/v3/usb/devices/{id}/data:
+    put:
+      summary: "Update USB device data"
+      description: "update USB device data\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateUSBDeviceData2"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateUSBDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "updateInfo"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/apiv3DeviceDataUpdateInfo"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "USB"
+    patch:
+      summary: "Update USB device data"
+      description: "update USB device data\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateUSBDeviceData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateUSBDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "updateInfo"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/apiv3DeviceDataUpdateInfo"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "USB"
+  /api/v3/usb/devices/{id}/deviceclass:
+    put:
+      summary: "Update USB device class"
+      description: "update USB device class\nRequired scope: context; permission: classify"
+      operationId: "DeviceContextService_UpdateUSBDeviceClass"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateUSBDeviceClassResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClass"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3UpdateUSBDeviceClassRequestDeviceClassArray"
+      tags:
+      - "USB"
+  /api/v3/usb/devices/{id}/deviceid:
+    put:
+      summary: "Set USB device id"
+      description: "Set USB device id based on hardware id and device class\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_SetUsbDeviceId"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SetUsbDeviceIdResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClassScope"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v1DeviceClassScopedData"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "USB"
+  /api/v3/usb/devices/{id}/packets:
+    post:
+      summary: "Send USB southbound messages"
+      description: "Send southbound packet to the USB device.\nRequired scope: serialData; permission: readwrite"
+      operationId: "IngestionService_SendUsbSouthboundData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3SendUsbSouthboundDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        description: "USB ID"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "southboundData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3SendUsbSouthboundDataRequestSouthboundData"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "USB"
+  /api/v3/usb/stream/packets:
+    get:
+      summary: "Receive USB Northbound messages"
+      description: "Receive every raw packet filtered by the matching mechanisms declared in AppBundle."
+      operationId: "IngestionService_GetUsbDevicePacketStream"
+      responses:
+        "200":
+          description: "A successful response.(streaming responses)"
+          schema:
+            type: "object"
+            properties:
+              result:
+                $ref: "#/definitions/apiv3GetUsbDevicePacketStreamResponse"
+              error:
+                $ref: "#/definitions/rpcStatus"
+            title: "Stream result of apiv3GetUsbDevicePacketStreamResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "fields"
+        description: "Additional fields in northbound messages. Currently only support `DeviceClass`"
+        in: "query"
+        required: false
+        type: "array"
+        items:
+          type: "string"
+        collectionFormat: "multi"
+      tags:
+      - "USB"
+  /api/v3/zigbee/devices:
+    get:
+      summary: "Get Zigbee device list"
+      description: "get all Zigbee devices\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetZigbeeDeviceList"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetZigbeeDeviceListResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices-unclassified:
+    get:
+      summary: "Get unclassified zigbee device list"
+      description: "Unclassified zigbee devices matching OUI, E2PC, or both\nRequired scope: context; permission: readWrite"
+      operationId: "IngestionService_GetZigbeeDevicesUnclassified"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetZigbeeDevicesUnclassifiedResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}:
+    get:
+      summary: "Get zigbee device data"
+      description: "Get zigbee device data including device id and uuid, the difference between v3 and earlier version is that\nv3 api support getting multi device class and associated device id, earlier version only have one device id.\nRequired scope: context; permission: readonly"
+      operationId: "DeviceContextService_GetZigbeeDeviceData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3GetZigbeeDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}/data:
+    put:
+      summary: "Update Zigbee device data"
+      description: "update Zigbee device data\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateZigbeeDeviceData2"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateZigbeeDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "updateInfo"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/apiv3DeviceDataUpdateInfo"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Zigbee"
+    patch:
+      summary: "Update Zigbee device data"
+      description: "update Zigbee device data\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_UpdateZigbeeDeviceData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateZigbeeDeviceDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "updateInfo"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/apiv3DeviceDataUpdateInfo"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}/deviceclass:
+    put:
+      summary: "Update Zigbee device class"
+      description: "update Zigbee device class\nRequired scope: context; permission: classify"
+      operationId: "DeviceContextService_UpdateZigbeeDeviceClass"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/apiv3UpdateZigbeeDeviceClassResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClass"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3UpdateZigbeeDeviceClassRequestDeviceClassArray"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}/deviceid:
+    put:
+      summary: "Set zigbee device id"
+      description: "Set zigbee device id based on hardware id and device class\nRequired scope: context; permission: readwrite"
+      operationId: "DeviceContextService_SetZigbeeDeviceId"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SetZigbeeDeviceIdResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "deviceClassScope"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v1DeviceClassScopedData"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}/leave:
+    put:
+      summary: "SendZigbeeLeave"
+      description: "Unpair the zigbee device\nRequired scope: zigbee; permission: readwrite."
+      operationId: "IngestionService_SendZigbeeLeave"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SendZigbeeLeaveResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}/offline-timeout:
+    put:
+      summary: "Set Zigbee Offline Timeout"
+      description: "Specify the minutes of offline timeout.\nThe range is between 1 minutes to 1440 minutes(24h)."
+      operationId: "IngestionService_SetZigbeeOfflineTimeoutValue"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SetZigbeeOfflineTimeoutValueResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "timeoutData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3SetZigbeeOfflineTimeoutValueRequestTimeoutData"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}/packets:
+    post:
+      summary: "Send Zigbee southbound data"
+      description: "Send Zigbee southbound data.\nRequired scope: zigbee; permission: readwrite."
+      operationId: "IngestionService_SendZigbeeSouthboundData"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SendZigbeeSouthboundDataResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "southboundData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3SendZigbeeSouthboundDataRequestSouthboundData"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/devices/{id}/timeout:
+    put:
+      operationId: "IngestionService_SetZigbeeTimeoutValue"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3SetZigbeeTimeoutValueResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        type: "string"
+      - name: "timeoutData"
+        in: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/v3SetZigbeeTimeoutValueRequestTimeoutData"
+      - name: "idType"
+        description: " - ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+        in: "query"
+        required: false
+        type: "string"
+        enum:
+        - "ID_TYPE_DEVICE_ID"
+      - name: "deviceClass"
+        in: "query"
+        required: false
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/radios:
+    get:
+      summary: "Get zigbee radio list"
+      description: "All radios (with at least 1 device)\nRequired scope: context; permission: readonly."
+      operationId: "IngestionService_GetZigbeeRadios"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetZigbeeRadiosResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/radios/{radioMac}:
+    get:
+      summary: "Get zigbee radio detailed info"
+      description: "Required scope: context; permission: readonly."
+      operationId: "IngestionService_GetZigbeeRadioInfo"
+      responses:
+        "200":
+          description: "A successful response."
+          schema:
+            $ref: "#/definitions/v3GetZigbeeRadioInfoResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "radioMac"
+        in: "path"
+        required: true
+        type: "string"
+      tags:
+      - "Zigbee"
+  /api/v3/zigbee/stream/packets:
+    get:
+      summary: "Subscribe Zigbee packet stream"
+      description: "Subscribe Zigbee packet stream filtered by the matching mechanisms declared in AppBundle."
+      operationId: "IngestionService_SubscribeZigbeePacketStream"
+      responses:
+        "200":
+          description: "A successful response.(streaming responses)"
+          schema:
+            type: "object"
+            properties:
+              result:
+                $ref: "#/definitions/v3SubscribeZigbeePacketStreamResponse"
+              error:
+                $ref: "#/definitions/rpcStatus"
+            title: "Stream result of v3SubscribeZigbeePacketStreamResponse"
+        default:
+          description: "An unexpected error response."
+          schema:
+            $ref: "#/definitions/rpcStatus"
+      parameters:
+      - name: "fields"
+        description: "Additional fields in northbound messages. Currently only support `DeviceClass`"
+        in: "query"
+        required: false
+        type: "array"
+        items:
+          type: "string"
+        collectionFormat: "multi"
+      tags:
+      - "Zigbee"
+definitions:
+  AccelerometerAccelStatus:
+    type: "string"
+    enum:
+    - "ACCEL_STATUS_OK"
+    - "ACCEL_STATUS_OUT_OF_RANGE"
+    - "ACCEL_STATUS_THRESHOLD1"
+    - "ACCEL_STATUS_THRESHOLD2"
+    description: "- ACCEL_STATUS_UNSPECIFIED: unspecified status\n - ACCEL_STATUS_OK: status ok\n - ACCEL_STATUS_OUT_OF_RANGE: status out-of-range\n - ACCEL_STATUS_THRESHOLD1: status threshold1\n - ACCEL_STATUS_THRESHOLD2: status threshold2"
+    title: "accelerometer status types"
+  AggregationAggregationType:
+    type: "string"
+    enum:
+    - "AGGREGATION_TYPE_AVERAGE"
+    - "AGGREGATION_TYPE_LATEST"
+    - "AGGREGATION_TYPE_MAX"
+  BeaconCustomBeacon:
+    type: "object"
+    properties:
+      payload:
+        type: "string"
+        format: "byte"
+        title: "Custom advertisement payload bytes"
+    title: "Custom beacon"
+  DeviceDataBLEBeacons:
+    type: "object"
+    properties:
+      ibeacon:
+        $ref: "#/definitions/commonv1IBeacon"
+      eddystone:
+        $ref: "#/definitions/v1Eddystone"
+  EddystoneEddyEID:
+    type: "object"
+    properties:
+      calibratedPower:
+        type: "integer"
+        format: "int32"
+        description: "The Ranging Data is the Tx power in dBm emitted by the beacon at 0 meters.\n     minimum: -100,\n     maximum: 20,\n     example: \"-5\"."
+      eddystoneEidEid:
+        type: "string"
+        format: "byte"
+        description: "8-byte Ephemeral Identifier.\n    max_length: 8,\n    min_length: 8."
+    title: "Eddystone-EID"
+  EddystoneEddyTLM:
+    type: "object"
+    properties:
+      version:
+        type: "integer"
+        format: "int64"
+        description: "TLM version allows for future development of this frame type. At present the value must be 0x00\n example: \"1\"."
+      batteryVoltage:
+        type: "number"
+        format: "float"
+        description: "Battery voltage is the current battery charge in Volt.\n     minimum: 0,\n     example: \"100\"."
+      beaconTemperature:
+        type: "number"
+        format: "float"
+        description: "Beacon temperature is the temperature in degrees Celsius sensed by the beacon.\n example: \"18.5\"."
+      advCount:
+        type: "string"
+        format: "uint64"
+        description: "the running count of advertisement frames of all types emitted by the beacon since power-up or reboot.\n     minimum: 0,\n     example: \"100\"."
+      secCount:
+        type: "string"
+        format: "uint64"
+        description: "a 0.1 second resolution counter that represents time since beacon power-up or reboot.\n     minimum: 0,\n     example: \"200\"."
+    title: "Eddystone-TLM"
+  EddystoneEddyUID:
+    type: "object"
+    properties:
+      calibratedPower:
+        type: "integer"
+        format: "int32"
+        description: "The Ranging Data is the Tx power in dBm emitted by the beacon at -1 meters.\n     minimum: -100,\n     maximum: 20,\n     example: \"-5\"."
+      eddystoneUidNid:
+        type: "string"
+        format: "byte"
+        description: "The 9-byte Namespace ID component is unique self-assigned beacon ID namespace.\n     max_length: 9,\n     min_length: 9."
+      eddystoneUidBid:
+        type: "string"
+        format: "byte"
+        description: "The 5-byte Instance ID component is unique within the namespace.\n     max_length: 5,\n     min_length: 5."
+    title: "Eddystone UID"
+  EddystoneEddyURL:
+    type: "object"
+    properties:
+      calibratedPower:
+        type: "integer"
+        format: "int32"
+        description: "The Ranging Data is the Tx power in dBm emitted by the beacon at 0 meters.\n     minimum: -100,\n     maximum: 20,\n     example: \"-5\"."
+      eddystoneUrlPrefix:
+        type: "integer"
+        format: "int64"
+        description: "The URL Scheme Prefix byte defines the identifier scheme, an optional prefix and how the remainder of the URL is encoded.\n     minimum: 0,\n     maximum: 3."
+      eddystoneUrlEncodedUrl:
+        type: "string"
+        format: "byte"
+        description: "a URL using a compressed encoding format.\n     min_length: 1,\n     max_length: 17."
+    title: "Eddystone-URL"
+  FilterFilterType:
+    type: "string"
+    enum:
+    - "FILTER_TYPE_MIN_RSSI"
+    - "FILTER_TYPE_IBEACON_UUID"
+  GattAuthenticationRequestAuthenticationData:
+    type: "object"
+    properties:
+      method:
+        $ref: "#/definitions/v3AuthenticationMethod"
+      bonding:
+        type: "boolean"
+        title: "Whether bonding is enabled, which also depends on peer's bond"
+      passKey:
+        type: "string"
+        title: "Whether passkey is used. Passkey is  6 numeric digits (‘0’ - ‘9’)\n‘0’ will be prefixed if length of passkey is less than 6\nRequired when method is 'passkey' or 'lescPasskey'"
+      keyOob:
+        type: "string"
+        format: "byte"
+        title: "16-bytes hexadecimal key. 0 will be prefixed if its length is less than 16\nThis is required when method is 'oob' or 'lescOob'"
+      keyOwn:
+        type: "string"
+        format: "byte"
+        title: "16-bytes hexadecimal key. 0 will be prefixed if its length is less than 16\nThis is required when lesc is used, and peer uses the server's keyOwn or passkey is used"
+  GattConnectResponseConnUpdate:
+    type: "object"
+    properties:
+      mtuValue:
+        type: "integer"
+        format: "int64"
+        title: "The negotiated MTU Value between BLE central and peripheral"
+  GattEncryptionRequestEncryptionData:
+    type: "object"
+    properties:
+      bondingKey:
+        type: "string"
+        format: "byte"
+        title: "Encryption key which is generated when bonding is enabled for pairing"
+  GetRadiosRequestFirmwareType:
+    type: "string"
+    enum:
+    - "FIRMWARE_TYPE_ARUBA"
+    - "FIRMWARE_TYPE_SDR"
+  GetSecondaryDeviceListResponseSecondaryDevice:
+    type: "object"
+    properties:
+      deviceId:
+        type: "string"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  GetTPDataRequestAggregation:
+    type: "object"
+    properties:
+      reportInterval:
+        type: "string"
+        format: "int64"
+      rssiAggregation:
+        $ref: "#/definitions/AggregationAggregationType"
+  GetTPDataRequestSubscription:
+    type: "object"
+    properties:
+      type:
+        $ref: "#/definitions/SubscriptionSubscriptionType"
+      match:
+        type: "string"
+  InputsSwitchState:
+    type: "string"
+    enum:
+    - "SWITCH_STATE_UNKNOWN"
+    - "SWITCH_STATE_ON"
+    - "SWITCH_STATE_OFF"
+    description: "- SWITCH_STATE_UNSPECIFIED: switch statue unspecified\n - SWITCH_STATE_UNKNOWN: switch state unknown\n - SWITCH_STATE_ON: switch on\n - SWITCH_STATE_OFF: switch off"
+    title: "switch state definition"
+  IotRadioInventoryIotRadioFirmware:
+    type: "string"
+    enum:
+    - "IOT_RADIO_FIRMWARE_ARUBA"
+    - "IOT_RADIO_FIRMWARE_SDR"
+    description: "- IOT_RADIO_FIRMWARE_UNSPECIFIED: UNSPECIFIED\n - IOT_RADIO_FIRMWARE_ARUBA: Radio firmware ARUBA\n - IOT_RADIO_FIRMWARE_SDR: Radio firmware SDR"
+    title: "Hardware type of the Aruba radio"
+  IotRadioInventoryIotRadioType:
+    type: "string"
+    enum:
+    - "IOT_RADIO_TYPE_GEN1"
+    - "IOT_RADIO_TYPE_GEN2"
+    - "IOT_RADIO_TYPE_GEN3"
+    description: "- IOT_RADIO_TYPE_UNSPECIFIED: UNSPECIFIED\n - IOT_RADIO_TYPE_GEN1: gen1 is capable of BLE 4.0 only (3xx series minus 303P)\n - IOT_RADIO_TYPE_GEN2: gen2 is capable of BLE 5.0 and Zigbee  (303P, 5xx and 6xx series)\n - IOT_RADIO_TYPE_GEN3: gen3 is dual radio brcm solution  (7xx series)"
+    title: "Indicates type of the IoT radio HW"
+  IotRadioStateBleBleConsole:
+    type: "string"
+    enum:
+    - "BLE_CONSOLE_OFF"
+    - "BLE_CONSOLE_ON"
+    - "BLE_CONSOLE_DYNAMIC"
+    description: "- BLE_CONSOLE_UNSPECIFIED: UNSPECIFIED\n - BLE_CONSOLE_OFF: BLE console off\n - BLE_CONSOLE_ON: BLE console on\n - BLE_CONSOLE_DYNAMIC: BLE console dynamic"
+    title: "the value is consistent with ble_cmn_msg.h"
+  IotRadioStateBleBleOpMode:
+    type: "string"
+    enum:
+    - "BLE_OP_MODE_DISABLED"
+    - "BLE_OP_MODE_SCANNING"
+    - "BLE_OP_MODE_BEACONING"
+    - "BLE_OP_MODE_BOTH"
+    description: "- BLE_OP_MODE_UNSPECIFIED: UNSPECIFIED\n - BLE_OP_MODE_DISABLED: BLE op mode disabled\n - BLE_OP_MODE_SCANNING: BLE op mode scanning\n - BLE_OP_MODE_BEACONING: BLE op mode beaconing\n - BLE_OP_MODE_BOTH: BLE op mode both"
+    title: "the value is consistent with ble_cmn_msg.h"
+  IotRadioStateIotRadioMode:
+    type: "string"
+    enum:
+    - "IOT_RADIO_MODE_OFF"
+    - "IOT_RADIO_MODE_BLE"
+    - "IOT_RADIO_MODE_ZIGBEE"
+    - "IOT_RADIO_MODE_BOTH"
+    description: "- IOT_RADIO_MODE_UNSPECIFIED: UNSPECIFIED\n - IOT_RADIO_MODE_OFF: Radio mode off\n - IOT_RADIO_MODE_BLE: Radio mode BLE\n - IOT_RADIO_MODE_ZIGBEE: Radio mode ZigBee\n - IOT_RADIO_MODE_BOTH: Radio mode both"
+    title: "The 4 modes - off/ble/zigbee/both"
+  RadioBLEConsoleMode:
+    type: "string"
+    enum:
+    - "CONSOLE_MODE_ON"
+    - "CONSOLE_MODE_OFF"
+    description: "- CONSOLE_MODE_DYNAMIC: Dynamically enable BLE console\n - CONSOLE_MODE_ON: Enable BLE console\n - CONSOLE_MODE_OFF: Disable BLE console"
+    title: "Console modes. They are enum\nbuf:lint:ignore ENUM_ZERO_VALUE_SUFFIX"
+  RadioFirmwareVersion:
+    type: "object"
+    properties:
+      vendor:
+        type: "string"
+        title: "This is used to identify what current FW is\nUpgrade can start only when vendor is empty or isn't matched"
+      major:
+        type: "integer"
+        format: "int64"
+        title: "Major version: 0~7"
+      minor:
+        type: "integer"
+        format: "int64"
+        title: "Minor version: 0~15"
+      build:
+        type: "integer"
+        format: "int64"
+        title: "Build version: 0~255"
+    title: "FW version"
+  SensorAccelerometer:
+    type: "object"
+    properties:
+      x:
+        type: "number"
+        format: "float"
+        title: "x-axis"
+      "y":
+        type: "number"
+        format: "float"
+        title: "y-axis"
+      z:
+        type: "number"
+        format: "float"
+        title: "z-axis"
+      accelStatus:
+        $ref: "#/definitions/AccelerometerAccelStatus"
+    title: "Accelerometer"
+  SensorAlarm:
+    type: "string"
+    enum:
+    - "ALARM_WATER"
+    - "ALARM_SMOKE"
+    - "ALARM_FIRE"
+    - "ALARM_GLASS_BREAK"
+    - "ALARM_INTRUSION"
+    description: "- ALARM_UNSPECIFIED: unspecified alarm\n - ALARM_WATER: water alarm\n - ALARM_SMOKE: smoke alarm\n - ALARM_FIRE: fire alarm\n - ALARM_GLASS_BREAK: glass break alarm\n - ALARM_INTRUSION: intrusion alarm"
+    title: "Alarm types"
+  SensorExtended:
+    type: "object"
+    properties:
+      extendFieldKey:
+        type: "string"
+        example: "plain text"
+        title: "extended key"
+      extendFieldValue:
+        type: "string"
+        format: "byte"
+        example: "YmFzZTY0IGZyb20gYnl0ZXMK"
+        title: "extended value"
+    title: "extended value definition"
+  SensorInputs:
+    type: "object"
+    properties:
+      switchIndexes:
+        type: "array"
+        items:
+          $ref: "#/definitions/InputsSwitchState"
+        title: "switch states"
+    title: "switch inputs"
+  SetZigbeeTimeoutValueRequestTimeout:
+    type: "string"
+    enum:
+    - "TIMEOUT_INFINITE"
+    - "TIMEOUT_10SEC"
+    - "TIMEOUT_2MIN"
+    - "TIMEOUT_4MIN"
+    - "TIMEOUT_8MIN"
+    - "TIMEOUT_16MIN"
+    - "TIMEOUT_32MIN"
+    - "TIMEOUT_64MIN"
+    - "TIMEOUT_128MI"
+    - "TIMEOUT_256MIN"
+    - "TIMEOUT_512MIN"
+    - "TIMEOUT_1024MIN"
+    - "TIMEOUT_2048MIN"
+    - "TIMEOUT_4096MIN"
+    - "TIMEOUT_8192MIN"
+    - "TIMEOUT_16384MIN"
+    title: "buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX"
+  SubscribeDeviceClassResponseDeviceClass:
+    type: "object"
+    properties:
+      hwId:
+        type: "string"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  SubscribeDeviceEventResponseDeviceMergeEvent:
+    type: "object"
+    properties:
+      deviceType:
+        $ref: "#/definitions/v1DeviceType"
+      dstHwId:
+        type: "string"
+      srcHwId:
+        type: "array"
+        items:
+          type: "string"
+  SubscriptionSubscriptionType:
+    type: "string"
+    enum:
+    - "SUBSCRIPTION_TYPE_DEVICE_CLASS"
+  USBIfaceAttrs:
+    type: "object"
+    properties:
+      authorized:
+        type: "boolean"
+        title: "Interface authorized"
+      bInterfaceNumber:
+        type: "integer"
+        format: "int64"
+        title: "(b_interface_number)bInterfaceNumber indicates the index of the interface descriptor.\nThis should be zero based, and incremented once for each new interface descriptor.\n(usb interface id (0...n) → iface id)  (SE map bInterfaceNumber to iface id)  (set it in appbundle)"
+      bAlternateSetting:
+        type: "integer"
+        format: "int64"
+        description: "(b_alternate_setting)bAlternativeSetting can be used to specify alternative interfaces.\nThese alternative interfaces can be selected with the Set Interface request.\nbInterfaceNumber and bAlternateSetting contain index values that the host uses to activate the interface and one of its alternate settings.\nFor activation, an application or a driver specifies the index value in the function call.\nBased on that information, the USB driver stack then builds a standard control request (SET INTERFACE) and sends it to the device."
+      bInterfaceClass:
+        type: "integer"
+        format: "int64"
+        description: "Class Code (Assigned by USB Org)\nbInterfaceClass, bInterfaceSubClass and bInterfaceProtocol can be used to specify supported classes (e.g. HID, communications, mass storage etc.)\nThis allows many devices to use class drivers preventing the need to write specific drivers for your device."
+      bInterfaceSubClass:
+        type: "integer"
+        format: "int64"
+        title: "Code (Assigned by USB Org)"
+      bInterfaceProtocol:
+        type: "integer"
+        format: "int64"
+        title: "Protocol Code (Assigned by USB Org)"
+      bNumEndpoints:
+        type: "integer"
+        format: "int64"
+        title: "Number of endpoints used by the interface"
+    title: "interface attributes\nfor example:\nbInterfaceNumber:     0x00\nbAlternateSetting:    0x00\nbInterfaceClass:      0x0E\nbInterfaceSubClass:   0x02\nbInterfaceProtocol:   0x00"
+  USBIfaceClass:
+    type: "string"
+    enum:
+    - "CLASS_TTY"
+    - "CLASS_NET"
+    description: "- CLASS_UNSPECIFIED: Usually, it means current interface isn't driven successfully or not supported yet.\n - CLASS_TTY: TTY based\n - CLASS_NET: Ethernet based"
+    title: "Interface Class"
+  USBIfaceUSBLuaStatus:
+    type: "string"
+    enum:
+    - "USB_LUA_STATUS_READY"
+    - "USB_LUA_STATUS_RUNNING"
+    - "USB_LUA_STATUS_PANICKED"
+    - "USB_LUA_STATUS_OOMED"
+    - "USB_LUA_STATUS_STUCK"
+    description: "- USB_LUA_STATUS_DISABLED: Lua script is disabled\n - USB_LUA_STATUS_READY: Lua script is ready\n - USB_LUA_STATUS_RUNNING: Lua script is running\n - USB_LUA_STATUS_PANICKED: Lua script has panicked\n - USB_LUA_STATUS_OOMED: Lua script panicked due to out-of-memory\n - USB_LUA_STATUS_STUCK: Lua script is not responsible"
+    title: "buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX\nUSB Lua status values"
+  UpdateSecondaryDeviceDataRequestSecondaryDeviceData:
+    type: "object"
+    properties:
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+  apiv1GetBleDeviceDataResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      deviceId:
+        type: "string"
+      name:
+        type: "string"
+      hwModel:
+        type: "string"
+      seqNumber:
+        type: "integer"
+        format: "int64"
+      bleMacAddressType:
+        type: "string"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      ibeacon:
+        $ref: "#/definitions/commonv1IBeacon"
+      eddyBeacon:
+        $ref: "#/definitions/v1Eddystone"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      customInfo:
+        $ref: "#/definitions/v1CustomInfo"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+      locationData:
+        $ref: "#/definitions/apiv1LocationData"
+    title: "buf:lint:ignore FIELD_LOWER_SNAKE_CASE"
+  apiv1LocationData:
+    type: "object"
+    properties:
+      floorId:
+        type: "string"
+      latitude:
+        type: "number"
+        format: "double"
+      longitude:
+        type: "number"
+        format: "double"
+      x:
+        type: "number"
+        format: "float"
+      "y":
+        type: "number"
+        format: "float"
+      located:
+        type: "boolean"
+  apiv2BeaconConfig:
+    type: "object"
+    properties:
+      profileId:
+        type: "string"
+      advFormat:
+        $ref: "#/definitions/apiv2BeaconConfigAdvFormat"
+      interval:
+        type: "integer"
+        format: "int64"
+      uuid:
+        type: "string"
+      major:
+        type: "integer"
+        format: "int64"
+      minor:
+        type: "integer"
+        format: "int64"
+      payload:
+        type: "string"
+  apiv2BeaconConfigAdvFormat:
+    type: "string"
+    enum:
+    - "ADV_FORMAT_CUSTOM"
+    title: "buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX"
+  apiv2DeviceDataUpdateInfo:
+    type: "object"
+    properties:
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+  apiv2GetUsbDevicePacketStreamResponse:
+    type: "object"
+    properties:
+      hardwareId:
+        type: "string"
+        title: "USB ID of the source device"
+      interfaceNumber:
+        type: "integer"
+        format: "int64"
+        title: "USB interface number of source device"
+      apMac:
+        type: "string"
+        title: "AP MAC of data source"
+      data:
+        type: "string"
+        format: "byte"
+        title: "Data payload from device"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+        title: "Device Class of the source device"
+  apiv2GetZigbeeDeviceDataResponse:
+    type: "object"
+    properties:
+      Mac:
+        type: "string"
+      Name:
+        type: "string"
+      NWKAddress:
+        type: "integer"
+        format: "int64"
+      Radio:
+        type: "string"
+      LQI:
+        type: "integer"
+        format: "int64"
+      LastSeen:
+        type: "string"
+        format: "int64"
+      Uptime:
+        type: "string"
+        format: "int64"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+    title: "v2GetZigbeeDeviceDataResponse"
+  apiv2LocationData:
+    type: "object"
+    properties:
+      floorId:
+        type: "string"
+      latitude:
+        type: "number"
+        format: "double"
+      longitude:
+        type: "number"
+        format: "double"
+      x:
+        type: "number"
+        format: "float"
+      "y":
+        type: "number"
+        format: "float"
+      located:
+        type: "boolean"
+  apiv2SendAppInfoResponse:
+    type: "object"
+    properties:
+      result:
+        type: "string"
+  apiv2SendUsbSouthboundDataResponse:
+    type: "object"
+  apiv2SetBeaconConfigResponse:
+    type: "object"
+    properties:
+      result:
+        type: "string"
+  apiv2UpdateBLEDeviceClassResponse:
+    type: "object"
+  apiv2UpdateBLEDeviceDataResponse:
+    type: "object"
+  apiv2UpdateUSBDeviceClassResponse:
+    type: "object"
+  apiv2UpdateUSBDeviceDataResponse:
+    type: "object"
+  apiv2UpdateZigbeeDeviceClassResponse:
+    type: "object"
+  apiv2UpdateZigbeeDeviceDataResponse:
+    type: "object"
+  apiv3BeaconConfig:
+    type: "object"
+    properties:
+      profileId:
+        type: "string"
+      advFormat:
+        $ref: "#/definitions/apiv3BeaconConfigAdvFormat"
+      interval:
+        type: "integer"
+        format: "int64"
+      uuid:
+        type: "string"
+      major:
+        type: "integer"
+        format: "int64"
+      minor:
+        type: "integer"
+        format: "int64"
+      payload:
+        type: "string"
+  apiv3BeaconConfigAdvFormat:
+    type: "string"
+    enum:
+    - "ADV_FORMAT_IBEACON"
+    - "ADV_FORMAT_CUSTOM"
+  apiv3DeleteSecondaryDeviceResponse:
+    type: "object"
+  apiv3DeviceDataUpdateInfo:
+    type: "object"
+    properties:
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      suppressed:
+        type: "boolean"
+      selfReportedLocation:
+        $ref: "#/definitions/commonv1Location"
+    title: "Device data update info"
+  apiv3DeviceInfo:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      name:
+        type: "string"
+      online:
+        type: "boolean"
+      uptime:
+        type: "string"
+        format: "int64"
+      firstSeen:
+        type: "string"
+        format: "int64"
+      lastSeen:
+        type: "string"
+        format: "int64"
+      statistics:
+        $ref: "#/definitions/v1Statistics"
+  apiv3GetBleDeviceDataResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      name:
+        type: "string"
+      hwModel:
+        type: "string"
+      seqNumber:
+        type: "integer"
+        format: "int64"
+      bleMacAddressType:
+        $ref: "#/definitions/v1BLEMacAddressType"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      ibeacon:
+        $ref: "#/definitions/commonv1IBeacon"
+      eddyBeacon:
+        $ref: "#/definitions/v1Eddystone"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      customInfo:
+        $ref: "#/definitions/v1CustomInfo"
+      locationData:
+        $ref: "#/definitions/commonv1Location"
+      deviceClassScope:
+        type: "object"
+        additionalProperties:
+          $ref: "#/definitions/v1DeviceClassScopedData"
+      selfReportedLocation:
+        $ref: "#/definitions/commonv1Location"
+  apiv3GetUsbDevicePacketStreamResponse:
+    type: "object"
+    properties:
+      hardwareId:
+        type: "string"
+        title: "USB ID of the source device"
+      interfaceNumber:
+        type: "integer"
+        format: "int64"
+        title: "USB interface number of source device"
+      apMac:
+        type: "string"
+        title: "AP MAC of data source"
+      data:
+        type: "string"
+        format: "byte"
+        title: "Data payload from device"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+        title: "Device Class of the source device"
+  apiv3GetZigbeeDeviceDataResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      name:
+        type: "string"
+      networkAddress:
+        type: "integer"
+        format: "int64"
+      radio:
+        type: "string"
+      lqi:
+        type: "integer"
+        format: "int64"
+      lastSeen:
+        type: "string"
+        format: "int64"
+      uptime:
+        type: "string"
+        format: "int64"
+      deviceClassScope:
+        type: "object"
+        additionalProperties:
+          $ref: "#/definitions/v1DeviceClassScopedData"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      online:
+        type: "boolean"
+      offlineTimeoutMinute:
+        type: "integer"
+        format: "int64"
+  apiv3SendAppInfoRequest:
+    type: "object"
+    properties:
+      infoType:
+        type: "string"
+      message:
+        type: "string"
+  apiv3SendAppInfoResponse:
+    type: "object"
+    properties:
+      result:
+        type: "string"
+  apiv3SendUsbSouthboundDataResponse:
+    type: "object"
+  apiv3SetBeaconConfigResponse:
+    type: "object"
+    properties:
+      result:
+        type: "string"
+  apiv3UpdateBLEDeviceClassResponse:
+    type: "object"
+  apiv3UpdateBLEDeviceDataResponse:
+    type: "object"
+  apiv3UpdateUSBDeviceClassResponse:
+    type: "object"
+  apiv3UpdateUSBDeviceDataResponse:
+    type: "object"
+  apiv3UpdateZigbeeDeviceClassResponse:
+    type: "object"
+  apiv3UpdateZigbeeDeviceDataResponse:
+    type: "object"
+  commonv1DeviceInfo:
+    type: "object"
+    properties:
+      deviceName:
+        type: "string"
+        title: "device name specified by application"
+      measuredPower:
+        type: "integer"
+        format: "int32"
+        title: "measured power: RSSI at 1 meter"
+    title: "Device info specified by applications"
+  commonv1IBeacon:
+    type: "object"
+    properties:
+      ibeaconUuid:
+        type: "string"
+        title: "a UUID specific to their app and deployment use case"
+      ibeaconMajor:
+        type: "integer"
+        format: "int64"
+        description: "specifies a specific iBeacon and use case.\n   minimum: 0,\n   maximum: 65535,\n   example: \"10\"."
+      ibeaconMinor:
+        type: "integer"
+        format: "int64"
+        description: "subdivision of region or use case.\n   minimum: 0,\n   maximum: 65535,\n   example: \"20\"."
+      ibeaconPower:
+        type: "integer"
+        format: "int32"
+        description: "measured power value in RSSI of a Proximity Beacon at a distance of 1 meter from the beacon.\n   minimum: -100,\n   maximum: 0,\n   example: \"10\"."
+      beaconExtra:
+        type: "string"
+        format: "byte"
+        title: "trailing data after specified iBeacon packet"
+    title: "IBeacon protocol"
+  commonv1Location:
+    type: "object"
+    properties:
+      latitude:
+        type: "number"
+        format: "double"
+        description: "latitude These must be specified as degrees in the WGS84 coordinate system."
+      latitudeUncertainty:
+        type: "number"
+        format: "double"
+        description: "latitude uncertainty The uncertainty in the latitude measurement, measured in degrees. It indicates the possible error range in the latitude value."
+      longitude:
+        type: "number"
+        format: "double"
+        description: "longitude These must be specified as degrees in the WGS84 coordinate system."
+      longitudeUncertainty:
+        type: "number"
+        format: "double"
+        description: "longitude uncertainty  The uncertainty in the longitude measurement, measured in degrees. It indicates the possible error range in the longitude value."
+      unitsPerMeter:
+        type: "number"
+        format: "float"
+        description: "units per meter. Default value is 1."
+      x:
+        type: "number"
+        format: "float"
+        description: "x is in meters, These indicate the x-distance from the origin point (0, 0) which is the top, left corner of the floorplan."
+      "y":
+        type: "number"
+        format: "float"
+        description: "y is in meters, These indicate the y-distance from the origin point (0, 0) which is the top, left corner of the floorplan."
+      floorId:
+        type: "string"
+        description: "floor id A string representing the identifier of the floor within the building. This helps in distinguishing between different floors in a multi-story building."
+      floorNumber:
+        type: "number"
+        format: "float"
+        description: "floor number These must be specified as floors above the groundfloor in a building. 0 is the groundfloor. Positive numbers are above. Negative numbers can be used to indicate basement floors. Non-integers can be used to indicate in-between levels such as mezzanine levels or partial floors."
+      elevation:
+        type: "number"
+        format: "double"
+        description: "elevation the value will be same with altitude, measured in meters above 0 in the WGS84 coordinate system."
+      elevationUncertainty:
+        type: "number"
+        format: "double"
+        description: "elevation uncertainty the value will be same with altitude_uncertainty, measured in meters."
+      xUncertainty:
+        type: "number"
+        format: "float"
+        description: "x uncertainty The uncertainty in the x-coordinate measurement, measured in meters. It indicates the possible error range in the x-coordinate value."
+      yUncertainty:
+        type: "number"
+        format: "float"
+        description: "y uncertainty The uncertainty in the y-coordinate measurement, measured in meters. It indicates the possible error range in the y-coordinate value."
+    description: "for self reported location, the location can be in WGS84 or floorplan coordinate system\nthe valid input will be:\n GeoLocation\n 1. latitude, longitude\n 2. latitude, longitude, latitudeUncertainty, longitudeUncertainty\n 3. latitude, longitude, altitude\n 4. latitude, longitude, altitude, altitudeUncertainty\n 5. latitude, longitude, latitudeUncertainty, longitudeUncertainty, altitude, altitudeUncertainty\n 6. latitude, longitude, floorNumber\n floorLocation\n 1. x, y, floorId\n 2. x, y, xUncertainty, yUncertainty, floorId"
+    title: "Location"
+  protobufAny:
+    type: "object"
+    properties:
+      '@type':
+        type: "string"
+    additionalProperties: {}
+  protobufNullValue:
+    type: "string"
+    description: "`NullValue` is a singleton enumeration to represent the null value for the\n`Value` type union.\n\nThe JSON representation for `NullValue` is JSON `null`.\n\n - NULL_VALUE: Null value."
+  rpcStatus:
+    type: "object"
+    properties:
+      code:
+        type: "integer"
+        format: "int32"
+      message:
+        type: "string"
+      details:
+        type: "array"
+        items:
+          $ref: "#/definitions/protobufAny"
+  rpcv1DeleteSecondaryDeviceResponse:
+    type: "object"
+  v1BLEFrameType:
+    type: "string"
+    enum:
+    - "BLE_FRAME_TYPE_ADV_IND"
+    - "BLE_FRAME_TYPE_ADV_DIRECT_IND"
+    - "BLE_FRAME_TYPE_ADV_NONCONN_IND"
+    - "BLE_FRAME_TYPE_SCAN_RSP"
+    - "BLE_FRAME_TYPE_ADV_SCAN_IND"
+    - "BLE_FRAME_TYPE_EXTENDED_CONNECTABLE_NONSCANNABLE_UNDIRECTED"
+    - "BLE_FRAME_TYPE_EXTENDED_CONNECTABLE_NONSCANNABLE_DIRECTED"
+    - "BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_SCANNABLE_UNDIRECTED"
+    - "BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_SCANNABLE_DIRECTED"
+    - "BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED"
+    - "BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_NONSCANNABLE_DIRECTED"
+    description: "- BLE_FRAME_TYPE_ADV_UNSPECIFIED: Frame type unspecified\n - BLE_FRAME_TYPE_ADV_IND: Connectable undirected advertising which can be connected to by any BLE central.\n - BLE_FRAME_TYPE_ADV_DIRECT_IND: Connectable directed advertising which can be connected to by one specific Central.\n - BLE_FRAME_TYPE_ADV_NONCONN_IND: Non-connectable undirected advertising which cannot be connected to and cannot respond to a scan request.\n - BLE_FRAME_TYPE_SCAN_RSP: The scan response packet containing any additional info sent by the peripheral.\n - BLE_FRAME_TYPE_ADV_SCAN_IND: Scannable undirected advertising which cannot be connected to but which can respond to a scan request.\n - BLE_FRAME_TYPE_EXTENDED_CONNECTABLE_NONSCANNABLE_UNDIRECTED: Connectable non-scannable undirected advertising events using extended advertising PDUs.\n - BLE_FRAME_TYPE_EXTENDED_CONNECTABLE_NONSCANNABLE_DIRECTED: Connectable non-scannable directed advertising events using extended advertising PDUs.\n - BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_SCANNABLE_UNDIRECTED: Non-connectable scannable undirected advertising events using extended advertising PDUs. @note Only scan response data is supported.\n - BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_SCANNABLE_DIRECTED: Non-connectable scannable directed advertising events using extended advertising PDUs. @note Only scan response data is supported.\n - BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED: Non-connectable non-scannable undirected advertising events using extended advertising PDUs.\n - BLE_FRAME_TYPE_EXTENDED_NONCONNECTABLE_NONSCANNABLE_DIRECTED: Non-connectable non-scannable directed advertising events using extended advertising PDUs."
+    title: "BLE frame type"
+  v1BLEMacAddressType:
+    type: "string"
+    enum:
+    - "BLE_MAC_ADDRESS_TYPE_PUBLIC"
+    - "BLE_MAC_ADDRESS_TYPE_RANDOM_STATIC"
+    - "BLE_MAC_ADDRESS_TYPE_RANDOM_PRIVATE_NON_RESOLVABLE"
+    - "BLE_MAC_ADDRESS_TYPE_RANDOM_PRIVATE_RESOLVABLE"
+    description: "- BLE_MAC_ADDRESS_TYPE_UNSPECIFIED: Mac address unspecified\n - BLE_MAC_ADDRESS_TYPE_PUBLIC: Public MAC Address\n - BLE_MAC_ADDRESS_TYPE_RANDOM_STATIC: Random Static MAC Address\n - BLE_MAC_ADDRESS_TYPE_RANDOM_PRIVATE_NON_RESOLVABLE: Random Private Non-Resolvable MAC Address\n - BLE_MAC_ADDRESS_TYPE_RANDOM_PRIVATE_RESOLVABLE: Random Private Resolvable MAC Address"
+    title: "BLE MAC address type"
+  v1Beacon:
+    type: "object"
+    properties:
+      advFormat:
+        type: "integer"
+        format: "int64"
+        title: "Advertisement format: ibeacon/custom"
+      interval:
+        type: "integer"
+        format: "int64"
+        title: "Advertisement interval (in ms, should be multiple of 100)"
+      ibeacon:
+        $ref: "#/definitions/v1BeaconIBeacon"
+      customBeacon:
+        $ref: "#/definitions/BeaconCustomBeacon"
+    title: "Beacon configuration"
+  v1BeaconIBeacon:
+    type: "object"
+    properties:
+      uuid:
+        type: "string"
+        title: "IBeacon UUID"
+      major:
+        type: "integer"
+        format: "int64"
+        title: "IBeacon Major"
+      minor:
+        type: "integer"
+        format: "int64"
+        title: "IBeacon Minor"
+    title: "IBeacon"
+  v1CreateOrUpdateDeviceResponse:
+    type: "object"
+  v1CustomInfo:
+    type: "object"
+    properties:
+      completeLocalName:
+        type: "string"
+        title: "BLE complete local name override"
+    title: "Customized device info by applications"
+  v1DeleteDeviceClassResponse:
+    type: "object"
+  v1DeviceClassScopedData:
+    type: "object"
+    properties:
+      deviceId:
+        type: "string"
+        title: "the device ID of the device in the given device class"
+    title: "Device class scoped data"
+  v1DeviceData:
+    type: "object"
+    properties:
+      hardwareId:
+        type: "string"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      appId:
+        type: "string"
+      deviceId:
+        type: "string"
+      hwModel:
+        type: "string"
+      beacons:
+        $ref: "#/definitions/DeviceDataBLEBeacons"
+      bleMacAddressType:
+        $ref: "#/definitions/v1BLEMacAddressType"
+      deviceType:
+        $ref: "#/definitions/v1DeviceType"
+      customInfo:
+        $ref: "#/definitions/v1CustomInfo"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      deviceClassScope:
+        type: "object"
+        additionalProperties:
+          $ref: "#/definitions/v1DeviceClassScopedData"
+      macAddress:
+        type: "string"
+      suppressed:
+        type: "boolean"
+      selfReportedLocation:
+        $ref: "#/definitions/v1SelfReportedLocation"
+  v1DeviceType:
+    type: "string"
+    enum:
+    - "DEVICE_TYPE_BLE"
+    - "DEVICE_TYPE_ZIGBEE"
+    - "DEVICE_TYPE_USB"
+    - "DEVICE_TYPE_AP"
+    - "DEVICE_TYPE_SECONDARY"
+    - "DEVICE_TYPE_RADIO"
+    description: "- DEVICE_TYPE_UNSPECIFIED: Device type unspecified\n - DEVICE_TYPE_BLE: BLE device\n - DEVICE_TYPE_ZIGBEE: Zigbee device\n - DEVICE_TYPE_USB: USB device\n - DEVICE_TYPE_AP: AP device\n - DEVICE_TYPE_SECONDARY: Secondary device\n - DEVICE_TYPE_RADIO: Radio"
+    title: "Device types used in IoTOperations"
+  v1Eddystone:
+    type: "object"
+    properties:
+      eddystoneUid:
+        $ref: "#/definitions/EddystoneEddyUID"
+      eddystoneUrl:
+        $ref: "#/definitions/EddystoneEddyURL"
+      eddystoneTlm:
+        $ref: "#/definitions/EddystoneEddyTLM"
+      eddystoneEid:
+        $ref: "#/definitions/EddystoneEddyEID"
+    title: "Eddystone protocol"
+  v1GetDeviceByDeviceIdAndClassResponse:
+    type: "object"
+    properties:
+      hwId:
+        type: "string"
+      deviceType:
+        $ref: "#/definitions/v1DeviceType"
+      deviceClasses:
+        type: "array"
+        items:
+          type: "string"
+  v1GetDeviceByHwIdResponse:
+    type: "object"
+    properties:
+      hwId:
+        type: "string"
+      deviceType:
+        $ref: "#/definitions/v1DeviceType"
+      deviceClasses:
+        type: "array"
+        items:
+          type: "string"
+  v1GetDeviceClassByDeviceIdResponse:
+    type: "object"
+    properties:
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  v1GetDeviceClassByHardwareIdResponse:
+    type: "object"
+    properties:
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  v1GetDeviceClassByMacAddressResponse:
+    type: "object"
+    properties:
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  v1GetTPDataRequestFilter:
+    type: "object"
+    properties:
+      filterType:
+        $ref: "#/definitions/FilterFilterType"
+      filterValues:
+        type: "array"
+        items:
+          type: "string"
+  v1GetTPDataResponse:
+    type: "object"
+    properties:
+      data:
+        type: "string"
+        format: "byte"
+  v1HealthStatus:
+    type: "string"
+    enum:
+    - "HEALTH_STATUS_HEALTHY"
+    - "HEALTH_STATUS_DEGRADED"
+    - "HEALTH_STATUS_UNAVAILABLE"
+    description: "- HEALTH_STATUS_UNSPECIFIED: UNSPECIFIED\n - HEALTH_STATUS_HEALTHY: worked well\n - HEALTH_STATUS_DEGRADED: worked not well\n - HEALTH_STATUS_UNAVAILABLE: when ap offline or radio, usb device plug out"
+    title: "health status"
+  v1IDType:
+    type: "string"
+    enum:
+    - "ID_TYPE_DEVICE_ID"
+    description: "- ID_TYPE_HARDWARE_ID: Id type hardwareId\n - ID_TYPE_DEVICE_ID: Id type deviceId"
+    title: "buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX\nId type used in IoTOperations partner API"
+  v1IotRadioInventory:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+        title: "MAC address of the device"
+      hardware:
+        $ref: "#/definitions/IotRadioInventoryIotRadioType"
+      firmware:
+        $ref: "#/definitions/IotRadioInventoryIotRadioFirmware"
+      health:
+        $ref: "#/definitions/v1HealthStatus"
+      external:
+        type: "boolean"
+        title: "Value will be true in case of the AP-USB-ZB dongle, false otherwise"
+      firmwareVersion:
+        type: "string"
+        title: "FW version, such as \"DFU App 1.4-123\""
+      state:
+        $ref: "#/definitions/v1IotRadioState"
+      id:
+        type: "string"
+        title: "radio id"
+    title: "Radio inventory"
+  v1IotRadioState:
+    type: "object"
+    properties:
+      radioMode:
+        $ref: "#/definitions/IotRadioStateIotRadioMode"
+      bleState:
+        $ref: "#/definitions/v1IotRadioStateBle"
+      zbState:
+        $ref: "#/definitions/v1IotRadioStateZigbee"
+    title: "radio state"
+  v1IotRadioStateBle:
+    type: "object"
+    properties:
+      bleOpMode:
+        $ref: "#/definitions/IotRadioStateBleBleOpMode"
+      bleTxPower:
+        type: "integer"
+        format: "int64"
+        title: "The operational txpower"
+      bleConsole:
+        $ref: "#/definitions/IotRadioStateBleBleConsole"
+      beacons:
+        type: "array"
+        items:
+          $ref: "#/definitions/v1Beacon"
+        title: "ibeacon and cbeacon's 3 slots config details"
+    title: "BLE radio state"
+  v1IotRadioStateZigbee:
+    type: "object"
+    properties:
+      zbOpMode:
+        type: "integer"
+        format: "int64"
+        title: "ZigBee op mode"
+      zbTxPower:
+        type: "integer"
+        format: "int64"
+        title: "ZigBee tx power"
+      zbChannel:
+        type: "integer"
+        format: "int64"
+        title: "ZigBee channel"
+      zbSecurity:
+        type: "boolean"
+        title: "ZigBee security"
+      zbPermitJoin:
+        type: "boolean"
+        title: "ZigBee permit join"
+      zbPanId:
+        type: "integer"
+        format: "int64"
+        title: "ZigBee pan id"
+    title: "ZigBee radio state"
+  v1RadioBLE:
+    type: "object"
+    properties:
+      opMode:
+        type: "array"
+        items:
+          $ref: "#/definitions/v1RadioBLEOpMode"
+        title: "Operating modes"
+      consoleMode:
+        $ref: "#/definitions/RadioBLEConsoleMode"
+      txpower:
+        type: "integer"
+        format: "int64"
+        title: "Transmit power used for both BLE and ZigBee. Unit is dDm"
+    title: "radio BLE"
+  v1RadioBLEOpMode:
+    type: "string"
+    enum:
+    - "OP_MODE_SCANNING"
+    description: "- OP_MODE_BEACONING: Enable beaconing\n - OP_MODE_SCANNING: Enable scanning"
+    title: "Operating modes. They can be combined\nbuf:lint:ignore ENUM_ZERO_VALUE_SUFFIX"
+  v1RadioFirmware:
+    type: "object"
+    properties:
+      type:
+        $ref: "#/definitions/v1RadioFirmwareType"
+      desiredVersion:
+        $ref: "#/definitions/RadioFirmwareVersion"
+      runningVersion:
+        $ref: "#/definitions/RadioFirmwareVersion"
+      upgrading:
+        type: "boolean"
+        title: "Whether an upgrade is ongoing"
+    title: "radio firmware"
+  v1RadioFirmwareType:
+    type: "string"
+    enum:
+    - "TYPE_SDR"
+    description: "- TYPE_DEFAULT: Aruba FW\n - TYPE_SDR: SDR FW, it could be any FWs from authorized partners"
+    title: "FW type\nbuf:lint:ignore ENUM_ZERO_VALUE_SUFFIX"
+  v1RadioZigBee:
+    type: "object"
+    properties:
+      opMode:
+        $ref: "#/definitions/v1RadioZigBeeOpMode"
+      channels:
+        type: "integer"
+        format: "int64"
+        title: "Configured channels. This is a bitmap. Channel range is 11-26"
+      panid:
+        type: "integer"
+        format: "int64"
+        title: "Configured PANID. It is a 2bytes hexadecimal number\nRange is [0x0000, 0xFFF0], 0xFFFF means AUTO"
+      permitJoining:
+        type: "boolean"
+        title: "Whether permit-joining is enabled"
+      permitJoiningDuration:
+        type: "integer"
+        format: "int64"
+        title: "Duration for the permit-joining\nRange is [60, 600]s"
+      security:
+        type: "boolean"
+        title: "Whether security is enabled"
+      txpower:
+        type: "integer"
+        format: "int64"
+        title: "Transmit power used for both BLE and ZigBee. Unit is dDm"
+      runningChannels:
+        type: "integer"
+        format: "int64"
+        title: "running channel"
+    title: "radio zigbee"
+  v1RadioZigBeeOpMode:
+    type: "string"
+    description: "- OP_MODE_COORDINATOR: Coordinator(ZC)"
+    title: "ZigBee mode. We don't support Router(ZR) and ZigBee End-Device(ZED)\nbuf:lint:ignore ENUM_ZERO_VALUE_SUFFIX"
+  v1SelfReportedLocation:
+    type: "object"
+    properties:
+      location:
+        $ref: "#/definitions/commonv1Location"
+      calculatedTimestamp:
+        type: "string"
+        format: "int64"
+  v1Sensor:
+    type: "object"
+    properties:
+      battery:
+        type: "number"
+        format: "float"
+        description: "Battery level in percentage(%).\n   minimum: 0,\n   maximum: 100,\n   example: \"75\"."
+      temperatureC:
+        type: "number"
+        format: "float"
+        description: "Temperature in Celsius(°C).\n   minimum: -273.15,\n   example: \"36.5\"."
+      humidity:
+        type: "number"
+        format: "float"
+        description: "Relative humidity in percentage(%).\n   minimum: 0,\n   maximum: 100,\n   example: \"45\"."
+      voltage:
+        type: "number"
+        format: "float"
+        description: "Voltage in volt(V).\n   minimum: -3.4028235e+38,\n   maximum: 3.4028235e+38,\n   example: \"12.5\"."
+      illumination:
+        type: "number"
+        format: "float"
+        description: "Illumination in lux.\n   minimum: 0,\n   maximum: 3.4028235e+38,\n   example: \"100\"."
+      motion:
+        type: "boolean"
+        description: "Indicator if motion is detected.\n   example: \"true\"."
+      current:
+        type: "number"
+        format: "float"
+        description: "Level of current in ampere(A).\n   minimum: -3.4028235e+38,\n   maximum: 3.4028235e+38,\n   example: \"5\"."
+      co:
+        type: "number"
+        format: "float"
+        description: "Level of carbon monoxide(CO) in parts per million(ppm).\n   minimum: 0,\n   maximum: 1000000,\n   example: \"10\"."
+      co2:
+        type: "number"
+        format: "float"
+        description: "Level of carbon dioxide(CO2) in parts per million(ppm).\n   minimum: 0,\n   maximum: 1000000,\n   example: \"20\"."
+      voc:
+        type: "number"
+        format: "float"
+        description: "Level of volatile organic compound(VOC) in parts per million(ppm).\n   minimum: 0,\n   maximum: 1000000,\n   example: \"30\"."
+      resistance:
+        type: "number"
+        format: "float"
+        description: "Level of resistance in ohm(Ω).\n   minimum: 0,\n   maximum: 3.4028235e+38,\n   example: \"20.5\"."
+      pressure:
+        type: "number"
+        format: "float"
+        description: "Level of pressure in Kilopascal(kPa).\n   minimum: 0,\n   maximum: 3.4028235e+38,\n   example: \"30\"."
+      distance:
+        type: "number"
+        format: "float"
+        description: "Distance in Meter(m).\n   minimum: 0,\n   maximum: 3.4028235e+38,\n   example: \"30\"."
+      capacitance:
+        type: "number"
+        format: "float"
+        description: "Capacitance in Farad(F).\n   minimum: 0,\n   maximum: 3.4028235e+38,\n   example: \"20.5\"."
+      alarm:
+        type: "array"
+        items:
+          $ref: "#/definitions/SensorAlarm"
+        description: "Set of active Alarms.\nexample: \"[\\\"ALARM_WATER\\\", \\\"ALARM_SMOKE\\\", \\\"ALARM_FIRE\\\"]\"."
+      accelerometer:
+        $ref: "#/definitions/SensorAccelerometer"
+      inputs:
+        $ref: "#/definitions/SensorInputs"
+      extended:
+        type: "array"
+        items:
+          $ref: "#/definitions/SensorExtended"
+        description: "Key value pairs that can be freely defined.\n   example: \"[{\\\"extendFieldKey\\\":\\\"key1\\\",\\\"extendFieldValue\\\":\\\"value1\\\"},{\\\"extendFieldKey\\\":\\\"key2\\\",\\\"extendFieldValue\\\":\\\"value2\\\"}]\"."
+    title: "Customized device sensor value reported by applications"
+  v1SetDeviceDataResponse:
+    type: "object"
+  v1SetDeviceDataStreamResponse:
+    type: "object"
+  v1Statistics:
+    type: "object"
+    properties:
+      txPackets:
+        type: "string"
+        format: "uint64"
+        title: "number of packets transmitted"
+      txBytes:
+        type: "string"
+        format: "uint64"
+        title: "bytes transmitted"
+      rxPackets:
+        type: "string"
+        format: "uint64"
+        title: "number of packets received"
+      rxBytes:
+        type: "string"
+        format: "uint64"
+        title: "bytes received"
+    title: "Device Statistics"
+  v1SubscribeDeviceClassRequestFilter:
+    type: "object"
+  v1SubscribeDeviceClassResponse:
+    type: "object"
+    properties:
+      deviceClass:
+        type: "array"
+        items:
+          $ref: "#/definitions/SubscribeDeviceClassResponseDeviceClass"
+      traceContext:
+        type: "object"
+        additionalProperties:
+          type: "string"
+  v1SubscribeDeviceEventResponse:
+    type: "object"
+    properties:
+      deviceMergeEvent:
+        $ref: "#/definitions/SubscribeDeviceEventResponseDeviceMergeEvent"
+      traceContext:
+        type: "object"
+        additionalProperties:
+          type: "string"
+  v1SubscribeDeviceResponse:
+    type: "object"
+    properties:
+      device:
+        type: "array"
+        items:
+          $ref: "#/definitions/v1SubscribeDeviceResponseDevice"
+      traceContext:
+        type: "object"
+        additionalProperties:
+          type: "string"
+  v1SubscribeDeviceResponseDevice:
+    type: "object"
+    properties:
+      hwId:
+        type: "string"
+      uuid:
+        type: "string"
+      deviceType:
+        $ref: "#/definitions/v1DeviceType"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      suppressed:
+        type: "boolean"
+      selfReportedLocation:
+        $ref: "#/definitions/v1SelfReportedLocation"
+  v1USBAttrs:
+    type: "object"
+    properties:
+      authorized:
+        type: "boolean"
+        title: "Device authorized"
+      serial:
+        type: "string"
+        title: "Serial"
+      speed:
+        type: "integer"
+        format: "int64"
+        title: "Speed"
+      bmAttributes:
+        type: "integer"
+        format: "int64"
+        title: "The bmAttributes contains a bitmask that indicates whether the configuration supports the remote wake-up feature,\nand whether the device is bus-powered or self-powered\nD7 Reserved, set to 1. (USB 1.0 Bus Powered)\nD6 Self Powered\nD5 Remote Wakeup\nD4..0 Reserved, set to 0"
+      bDeviceClass:
+        type: "integer"
+        format: "int64"
+        description: "Class Code (Assigned by USB Org)\nIf equal to Zero, each interface specifies it’s own class code\nIf equal to 0xFF, the class code is vendor specified.\nOtherwise field is valid Class Code."
+      bDeviceSubClass:
+        type: "integer"
+        format: "int64"
+        title: "Subclass Code (Assigned by USB Org)"
+      bDeviceProtocol:
+        type: "integer"
+        format: "int64"
+        title: "Protocol Code (Assigned by USB Org)"
+      bMaxPower:
+        type: "integer"
+        format: "int64"
+        title: "The MaxPower field specifies the maximum power (in milliamp units) that the device can draw from the host,\nwhen the device is bus-powered.\nMaximum Power Consumption in 2mA units"
+      bMaxPacketSize0:
+        type: "integer"
+        format: "int64"
+        title: "Maximum Packet Size for Zero Endpoint. Valid Sizes are 8, 16, 32, 64"
+      bNumConfigurations:
+        type: "integer"
+        format: "int64"
+        title: "Number of configurations that the device supports"
+      bConfigurationValue:
+        type: "integer"
+        format: "int64"
+        title: "The value to use when selecting this configuration"
+    title: "USB device attributes"
+  v1USBDescriptor:
+    type: "object"
+    properties:
+      vendorId:
+        type: "integer"
+        format: "int64"
+        title: "USB vendor IDs and product IDs are 16-bit numbers used to identify USB devices to a computer or other host.\nEach vendor ID is assigned by the USB Implementers Forum to a specific company,\nwhich in turn assign a PID to individual products"
+      productId:
+        type: "integer"
+        format: "int64"
+        title: "product ID"
+      bcdDevice:
+        type: "integer"
+        format: "int64"
+        title: "The bcdDevice value indicates the device-defined revision number.\nThe USB driver stack uses bcdDevice, along with idVendor and idProduct, to generate hardware and compatible IDs for the device"
+      manufacturer:
+        type: "string"
+        title: "Manufacturer"
+      product:
+        type: "string"
+        title: "Product string"
+      version:
+        type: "string"
+        title: "Version"
+    title: "USB device descriptor"
+  v1USBDeviceInventory:
+    type: "object"
+    properties:
+      identifier:
+        type: "string"
+        title: "USB ID"
+      status:
+        $ref: "#/definitions/v1HealthStatus"
+      usbDescriptor:
+        $ref: "#/definitions/v1USBDescriptor"
+    title: "USB device inventory"
+  v1USBIface:
+    type: "object"
+    properties:
+      id:
+        type: "string"
+        description: "device interface id: length 32, globally unique\nCurrently, AP use md5 to generate global 'unique' IDs for USB device and its interfaces.\nThe algorithm is md5sum(AP-MAC, devpath). devPath is a unique path generated by kernel and represents a USB device or its interface in system device tree."
+      up:
+        type: "boolean"
+        title: "'up' becomes TRUE when current interface is opened successfully"
+      attrs:
+        $ref: "#/definitions/USBIfaceAttrs"
+      class:
+        $ref: "#/definitions/USBIfaceClass"
+      driver:
+        type: "string"
+        title: "The name of the driver used to drive this interface"
+      luaName:
+        type: "string"
+        title: "The lua program used on the current interface"
+      luaStatus:
+        $ref: "#/definitions/USBIfaceUSBLuaStatus"
+    title: "USB interface descriptor"
+  v1UpdateBleDeviceClassResponse:
+    type: "object"
+  v1UpdateBleDeviceDataRequestDeviceDataUpdateInfo:
+    type: "object"
+    properties:
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+  v1UpdateBleDeviceDataResponse:
+    type: "object"
+  v1ZigbeeE2PC:
+    type: "object"
+    properties:
+      destEndpoint:
+        type: "integer"
+        format: "int64"
+        title: "Destination endpoint"
+      sourceEndpoint:
+        type: "integer"
+        format: "int64"
+        title: "Source endpoint"
+      profileId:
+        type: "integer"
+        format: "int64"
+        title: "Profile ID"
+      clusterId:
+        type: "integer"
+        format: "int64"
+        title: "Cluster ID"
+    title: "Zigbee E2PC"
+  v2GetBLEDeviceDataResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      deviceId:
+        type: "string"
+      name:
+        type: "string"
+      hwModel:
+        type: "string"
+      seqNumber:
+        type: "integer"
+        format: "int64"
+      bleMacAddressType:
+        type: "string"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      ibeacon:
+        $ref: "#/definitions/commonv1IBeacon"
+      eddyBeacon:
+        $ref: "#/definitions/v1Eddystone"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+      customInfo:
+        $ref: "#/definitions/v1CustomInfo"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+      locationData:
+        $ref: "#/definitions/apiv2LocationData"
+    title: "v1GetBLEDeviceDataResponse"
+  v2GetUSBDeviceDataResponse:
+    type: "object"
+    properties:
+      id:
+        type: "string"
+      descriptor:
+        $ref: "#/definitions/v1USBDescriptor"
+      attrs:
+        $ref: "#/definitions/v1USBAttrs"
+      iface:
+        type: "array"
+        items:
+          $ref: "#/definitions/v1USBIface"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+  v3AuthenticationMethod:
+    type: "string"
+    enum:
+    - "passkey"
+    - "oob"
+    - "lescNone"
+    - "lescPasskey"
+    - "lescOob"
+    description: "- none: legacy: no mitm\n - passkey: legacy: mitm, passkey\n - oob: legacy: mitm, keyOob\n - lescNone: lesc: no mitm\n - lescPasskey: lesc: mitm, passkey\n - lescOob: lesc: mitm, keyOob"
+    title: "buf:lint:ignore ENUM_VALUE_PREFIX\nbuf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE\nbuf:lint:ignore ENUM_ZERO_VALUE_SUFFIX\nMethod of security authentication"
+  v3CharProperty:
+    type: "string"
+    enum:
+    - "read"
+    - "writeWithoutResponse"
+    - "writeWithResponse"
+    - "notify"
+    - "indicate"
+    - "signedWrite"
+    - "writeReliable"
+    - "writeAux"
+    title: "buf:lint:ignore ENUM_VALUE_PREFIX\nbuf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE\nbuf:lint:ignore ENUM_VALUE_PREFIX\nbuf:lint:ignore ENUM_ZERO_VALUE_SUFFIX\nValues correspond to the different BLE GATT API transactions\nA subset of these might not be supported by certain AP types"
+  v3Characteristic:
+    type: "object"
+    properties:
+      serviceUuid:
+        type: "string"
+        example: "00005301000000414c50574953450000"
+        title: "service uuid (in hex format)"
+      characteristicUuid:
+        type: "string"
+        example: "00005301000000414c50574953450000"
+        title: "characteristic uuid (in hex format)"
+      value:
+        type: "string"
+        format: "byte"
+        example: "AQI="
+      properties:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3CharProperty"
+      apMac:
+        type: "string"
+        example: "d0:d3:e0:cb:78:88"
+        title: "reporter AP MAC address"
+      valueHandle:
+        type: "integer"
+        format: "int64"
+    title: "v3Characteristic"
+  v3CommonResponse:
+    type: "object"
+    properties:
+      status:
+        type: "string"
+        example: "success"
+        title: "Action result"
+      statusString:
+        type: "string"
+        title: "Optional additional freeform information"
+      apMac:
+        type: "string"
+        example: "d0:d3:e0:cb:78:88"
+        title: "reporter AP MAC address"
+  v3CreateSecondaryDeviceRequestSecondaryDeviceMetaData:
+    type: "object"
+    properties:
+      id:
+        type: "string"
+      parentDevices:
+        type: "array"
+        items:
+          type: "string"
+      deviceClasses:
+        type: "array"
+        items:
+          type: "string"
+    required:
+    - "id"
+    - "parentDevices"
+    - "deviceClasses"
+  v3CreateSecondaryDeviceResponse:
+    type: "object"
+  v3DeleteSecondaryDeviceParentResponse:
+    type: "object"
+  v3GattAtomicReadResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+      characteristics:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3Characteristic"
+  v3GattAtomicWriteResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GattAuthenticationResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+      bondingKey:
+        type: "string"
+        format: "byte"
+        title: "Bonding key is present when devices are bonded together"
+  v3GattConnectResponse:
+    type: "object"
+    properties:
+      status:
+        type: "string"
+        title: "Action result"
+      statusString:
+        type: "string"
+        title: "Optional additional freeform information"
+      apMac:
+        type: "string"
+        title: "reporter AP MAC address"
+      connUpdate:
+        $ref: "#/definitions/GattConnectResponseConnUpdate"
+      characteristics:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3Characteristic"
+  v3GattDisconnectResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GattEncryptionResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GattIndicateReceiveResponse:
+    type: "object"
+    properties:
+      status:
+        type: "string"
+        title: "Action result"
+      statusString:
+        type: "string"
+        title: "Optional additional freeform information"
+      apMac:
+        type: "string"
+        title: "reporter AP MAC address"
+      characteristics:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3Characteristic"
+  v3GattIndicateSubscribeResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GattIndicateUnsubscribeResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GattLuaScriptResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+      characteristics:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3Characteristic"
+  v3GattNotifyReceiveResponse:
+    type: "object"
+    properties:
+      status:
+        type: "string"
+        title: "Action result"
+      statusString:
+        type: "string"
+        title: "Optional additional freeform information"
+      apMac:
+        type: "string"
+        title: "reporter AP MAC address"
+      characteristics:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3Characteristic"
+  v3GattNotifySubscribeResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GattNotifyUnsubscribeResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GattReadResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+      characteristics:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3Characteristic"
+  v3GattWriteResponse:
+    type: "object"
+    properties:
+      result:
+        $ref: "#/definitions/v3CommonResponse"
+  v3GetAPInfoResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      name:
+        type: "string"
+      deviceType:
+        $ref: "#/definitions/v1DeviceType"
+      hwId:
+        type: "string"
+      hwType:
+        type: "string"
+      ipv4:
+        type: "string"
+      ipv6:
+        type: "string"
+      lastSeen:
+        type: "string"
+        format: "int64"
+      online:
+        type: "boolean"
+      swBuild:
+        type: "string"
+      swVersion:
+        type: "string"
+      statistics:
+        $ref: "#/definitions/v1Statistics"
+      healthStatus:
+        $ref: "#/definitions/v1HealthStatus"
+      location:
+        $ref: "#/definitions/commonv1Location"
+      radioInventory:
+        type: "array"
+        items:
+          $ref: "#/definitions/v1IotRadioInventory"
+      usbInventory:
+        type: "array"
+        items:
+          $ref: "#/definitions/v1USBDeviceInventory"
+  v3GetAPsResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "array"
+        items:
+          type: "string"
+  v3GetBLEDeviceListResponse:
+    type: "object"
+    properties:
+      hwId:
+        type: "array"
+        items:
+          type: "string"
+  v3GetRadioDetailResponse:
+    type: "object"
+    properties:
+      radio:
+        $ref: "#/definitions/v3GetRadioDetailResponseRadio"
+  v3GetRadioDetailResponseRadio:
+    type: "object"
+    properties:
+      id:
+        type: "string"
+      mac:
+        type: "string"
+        title: "8bytes MAC address of radio.\nWhen a radio is detected, its MAC might not be ready. The MAC will be updated later"
+      onboard:
+        type: "boolean"
+        title: "Whether the radio is onboard(internal) or USB(external)"
+      descriptor:
+        type: "string"
+        title: "A string describes the radio, for example, ONBOARD/NORDIC_ONBOARD/NORDIC_USB/etc\nThese values come from AP XML file and used in daemon for looking up radios\nONBOARD is TI"
+      description:
+        type: "string"
+        title: "A arbitry string describes what the radio is"
+      firmware:
+        $ref: "#/definitions/v1RadioFirmware"
+      ble:
+        $ref: "#/definitions/v1RadioBLE"
+      zigbee:
+        $ref: "#/definitions/v1RadioZigBee"
+      stats:
+        $ref: "#/definitions/v1Statistics"
+  v3GetRadiosResponse:
+    type: "object"
+    properties:
+      radios:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3GetRadiosResponseRadio"
+  v3GetRadiosResponseRadio:
+    type: "object"
+    properties:
+      id:
+        type: "string"
+      mac:
+        type: "string"
+  v3GetSecondaryDeviceListResponse:
+    type: "object"
+    properties:
+      devices:
+        type: "array"
+        items:
+          $ref: "#/definitions/GetSecondaryDeviceListResponseSecondaryDevice"
+  v3GetSecondaryDeviceResponse:
+    type: "object"
+    properties:
+      deviceId:
+        type: "string"
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+      parentDevices:
+        type: "array"
+        items:
+          type: "string"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+  v3GetUSBDeviceListResponse:
+    type: "object"
+    properties:
+      hwId:
+        type: "array"
+        items:
+          type: "string"
+  v3GetUsbDeviceDataResponse:
+    type: "object"
+    properties:
+      id:
+        type: "string"
+      descriptor:
+        $ref: "#/definitions/v1USBDescriptor"
+      attrs:
+        $ref: "#/definitions/v1USBAttrs"
+      iface:
+        type: "array"
+        items:
+          $ref: "#/definitions/v1USBIface"
+      deviceClassScope:
+        type: "object"
+        additionalProperties:
+          $ref: "#/definitions/v1DeviceClassScopedData"
+      sensor:
+        $ref: "#/definitions/v1Sensor"
+      deviceInfo:
+        $ref: "#/definitions/commonv1DeviceInfo"
+  v3GetZigbeeDeviceListResponse:
+    type: "object"
+    properties:
+      hwId:
+        type: "array"
+        items:
+          type: "string"
+  v3GetZigbeeDevicesUnclassifiedResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "array"
+        items:
+          type: "string"
+  v3GetZigbeeRadioInfoResponse:
+    type: "object"
+    properties:
+      device:
+        $ref: "#/definitions/apiv3DeviceInfo"
+      onboard:
+        type: "boolean"
+      channel:
+        type: "integer"
+        format: "int64"
+      rssi:
+        type: "integer"
+        format: "int32"
+      deviceNum:
+        type: "integer"
+        format: "int64"
+      txPower:
+        type: "integer"
+        format: "int32"
+      pans:
+        type: "array"
+        items:
+          $ref: "#/definitions/v3ZigbeeRadioPan"
+      mac:
+        type: "string"
+      apIp:
+        type: "string"
+  v3GetZigbeeRadiosResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "array"
+        items:
+          type: "string"
+  v3RadioIDType:
+    type: "string"
+    enum:
+    - "RADIO_ID_TYPE_MAC"
+  v3SendSDRSouthboundDataRequestSouthboundData:
+    type: "object"
+    properties:
+      payload:
+        type: "string"
+        format: "byte"
+    title: "Payload"
+  v3SendSDRSouthboundDataResponse:
+    type: "object"
+  v3SendUsbSouthboundDataRequestSouthboundData:
+    type: "object"
+    properties:
+      ifaceNum:
+        type: "integer"
+        format: "int64"
+        title: "USB interface number"
+      payload:
+        type: "string"
+        format: "byte"
+        title: "Data to be send to device"
+  v3SendZigbeeLeaveResponse:
+    type: "object"
+  v3SendZigbeeSouthboundDataRequestSouthboundData:
+    type: "object"
+    properties:
+      e2pc:
+        $ref: "#/definitions/v1ZigbeeE2PC"
+      payload:
+        type: "string"
+        format: "byte"
+      apsAck:
+        type: "boolean"
+  v3SendZigbeeSouthboundDataResponse:
+    type: "object"
+  v3SetBleDeviceIdResponse:
+    type: "object"
+  v3SetUsbDeviceIdResponse:
+    type: "object"
+  v3SetZigbeeDeviceIdResponse:
+    type: "object"
+  v3SetZigbeeOfflineTimeoutValueRequestTimeoutData:
+    type: "object"
+    properties:
+      timeoutMinute:
+        type: "integer"
+        format: "int64"
+        description: "specifies the timeout minutes to set the zigbee device offline.\n   minimum: 1,\n   maximum: 1440,\n   example: 10."
+  v3SetZigbeeOfflineTimeoutValueResponse:
+    type: "object"
+  v3SetZigbeeTimeoutValueRequestTimeoutData:
+    type: "object"
+    properties:
+      timeout:
+        $ref: "#/definitions/SetZigbeeTimeoutValueRequestTimeout"
+  v3SetZigbeeTimeoutValueResponse:
+    type: "object"
+  v3SubscribeBLEPacketStreamResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      apMac:
+        type: "string"
+      payload:
+        type: "string"
+        format: "byte"
+      rssi:
+        type: "integer"
+        format: "int32"
+      frameType:
+        $ref: "#/definitions/v1BLEFrameType"
+      deviceClasses:
+        type: "array"
+        items:
+          type: "string"
+      radioMac:
+        type: "string"
+      macAddressType:
+        $ref: "#/definitions/v1BLEMacAddressType"
+  v3SubscribeSDRPacketStreamResponse:
+    type: "object"
+    properties:
+      radioId:
+        type: "string"
+        title: "Radio ID"
+      payload:
+        type: "string"
+        format: "byte"
+        title: "Payload"
+      radioMac:
+        type: "string"
+        title: "Radio mac"
+      apMac:
+        type: "string"
+        title: "AP Mac"
+      deviceClasses:
+        type: "array"
+        items:
+          type: "string"
+        title: "DeviceClass of radio"
+  v3SubscribeZigbeePacketStreamResponse:
+    type: "object"
+    properties:
+      mac:
+        type: "string"
+      apMac:
+        type: "string"
+      radioMac:
+        type: "string"
+      payload:
+        type: "string"
+        format: "byte"
+      e2pc:
+        $ref: "#/definitions/v1ZigbeeE2PC"
+      deviceClasses:
+        type: "array"
+        items:
+          type: "string"
+  v3UpdateBLEDeviceClassRequestDeviceClassArray:
+    type: "object"
+    properties:
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  v3UpdateSecondaryDeviceDataResponse:
+    type: "object"
+  v3UpdateSecondaryDeviceRequestSecondaryDeviceMetaData:
+    type: "object"
+    properties:
+      parentDevices:
+        type: "array"
+        items:
+          type: "string"
+  v3UpdateSecondaryDeviceResponse:
+    type: "object"
+  v3UpdateUSBDeviceClassRequestDeviceClassArray:
+    type: "object"
+    properties:
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  v3UpdateZigbeeDeviceClassRequestDeviceClassArray:
+    type: "object"
+    properties:
+      deviceClass:
+        type: "array"
+        items:
+          type: "string"
+  v3ZigbeeRadioPan:
+    type: "object"
+    properties:
+      extendedPanid:
+        type: "string"
+        format: "byte"
+      panid:
+        type: "integer"
+        format: "int64"
+      networkSecurity:
+        type: "boolean"
+      permitJoining:
+        type: "boolean"
+securityDefinitions:
+  ApiKeyAuth:
+    type: "apiKey"
+    name: "apikey"
+    in: "header"
+security:
+- ApiKeyAuth: []

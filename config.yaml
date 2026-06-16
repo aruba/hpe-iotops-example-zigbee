@@ -1,0 +1,28 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+
+mqtt:
+  enabled: true
+  broker_url: ""          # Required: set via MQTT_BROKER_URL env var, e.g. tcp://192.168.1.100:1883
+  client_id: zigbee-demo-app  # Override via MQTT_CLIENT_ID env var
+  username: ""               # Optional: set via MQTT_USERNAME env var
+  password: ""               # Optional: set via MQTT_PASSWORD env var
+  commands_topic: iot/zigbee/commands   # Override via MQTT_COMMANDS_TOPIC env var
+  telemetry_topic: iot/zigbee/telemetry # Override via MQTT_TELEMETRY_TOPIC env var
+  qos: 1                     # Override via MQTT_QOS env var (0, 1, or 2)
+
+app:
+  log_level: INFO
+  telemetry_interval_seconds: 30
+  status_interval_seconds: 60
+
+# Aruba IoT Gateway connection — values below are overridden at runtime by the
+# container platform via environment variables (APIGW_URL, APIKEY, GATEWAY_ID, etc.).
+gateway:
+  apigw_url: ""          # set via APIGW_URL env var, e.g. http://apigw.iot-gateway.svc
+  api_key: ""            # set via APIKEY env var
+  gateway_id: ""         # set via GATEWAY_ID env var
+  gateway_ip: ""         # set via GATEWAY_IP env var
+  gateway_name: ""       # set via GATEWAY_NAME env var
+  request_timeout_seconds: 30
