@@ -21,33 +21,30 @@ This section explains what happens from startup to shutdown in simple steps.
  - Connectivity ping to the gateway (`/health` or equivalent).
  - If connectivity fails, remaining gateway startup substeps are skipped and logged as `gateway_startup_steps_skipped`.
  - If connectivity succeeds:
-    1. `zigbee_get_devices` — lists all currently known Zigbee devices.
-    2. `zigbee_get_devices_unclassified` — lists devices that have not yet been assigned a class.
-    3. **Provision discovered devices first** — union of devices returned by the two calls above.
-    4. **Then provision configured MACs** — `DEVICE_MAC_ADDRESS_1..5` (if present).
-    5. Start `appInfoReporter` goroutine.
-  - Per-device provisioning sequence (for both discovered and configured targets):
-    1. `UpdateDeviceClass` — assigns device class `["Aqara"]`.
-    2. `SetDeviceID` — assigns `<mac>_chinmay_<random>` scoped to class `Aqara`.
-    3. `SetOfflineTimeout` — sets offline timeout to **1440 minutes** (24 h).
-    4. `SetTimeoutValue` — sets keep-alive timeout to **`TIMEOUT_INFINITE`**.
-  - `SubscribePacketStream` — called once per provisioning batch and only if at least one device in that batch had both class and device ID set successfully.
+   1. `zigbee_get_devices` — lists all currently known Zigbee devices.
+   2. `zigbee_get_devices_unclassified` — lists devices that have not yet been assigned a class.
+   3. Build a deduplicated discovered device list from both responses.
+   4. For each discovered device:
+     - `UpdateDeviceClass` with `device_class=["aqara"]`.
+     - `SetDeviceID` with class `aqara` and ID format `<mac>_chinmay_<random>`.
+   5. If at least one device succeeds in both steps, call `zigbee_subscribe_packet_stream`.
+   6. Start `appInfoReporter` goroutine.
 
-1. Shared app state (`pkg/zigbee/device.go`)
+2. Shared app state (`pkg/zigbee/device.go`)
 
 - The app creates an in-memory device store.
 - No dummy devices are preloaded by default.
 - If `devices.json` already exists, previously saved devices are loaded from disk.
 - Handlers and MQTT both use this same store, so API actions and MQTT commands affect the same device state.
 
-1. MQTT setup (`pkg/mqtt/client.go`)
+3. MQTT setup (`pkg/mqtt/client.go`)
 
 - If MQTT is enabled, client connects to broker.
 - On connect, it subscribes to the southbound topic (default `iot/zigbee/southbound`).
 - Received messages are decoded and routed to the corresponding Aruba Zigbee API call.
 - Responses are published to the northbound topic (default `iot/zigbee/northbound`).
 
-1. HTTP API setup (`internal/api/server.go`)
+4. HTTP API setup (`internal/api/server.go`)
 
 - HTTP routes are registered:
   - `GET /health`
@@ -57,22 +54,22 @@ This section explains what happens from startup to shutdown in simple steps.
   - `POST /devices/{id}/command`
 - Each request is logged by middleware with method, path, status, and latency.
 
-1. Status heartbeat (`cmd/iot-app/main.go`)
+5. Status heartbeat (`cmd/iot-app/main.go`)
 
 - A background goroutine logs `status_report` every 60s (configurable).
 - Status includes uptime, MQTT connected state, last telemetry publish time, goroutine count, and current devices.
 
-1. Keep-running behavior
+6. Keep-running behavior
 
 - The HTTP server runs until process shutdown.
 - Even with no HTTP traffic and no MQTT messages, the app keeps running and emits periodic status logs.
 
-1. Graceful shutdown
+7. Graceful shutdown
 
 - On `SIGINT` or `SIGTERM`, the root context is cancelled.
 - MQTT client disconnects gracefully (publishes an in-flight drain, then disconnects).
 - HTTP server gets up to 10 seconds to finish in-flight requests before shutting down.
-- No explicit de-provisioning of devices is performed on shutdown; device class, device ID, offline timeout, and packet-stream subscription settings persist on the gateway.
+- No explicit device de-registration is performed on shutdown.
 
 ## Environment Variables
 
@@ -107,21 +104,6 @@ All MQTT server details are configured via environment variables. Pass them with
 
 > **Note:** If `APIGW_URL` is provided without protocol, the app prepends `http://` automatically.
 > **Exponential Backoff:** Startup connectivity to the gateway uses exponential backoff starting at 1 second, doubling on each retry, with a maximum interval of 30 minutes.
-
-### Device Auto-Provisioning (optional)
-
-Up to five device MAC addresses can be provided at startup. For each address the app will automatically set the device class to `Aqara`, assign a unique device ID, configure offline and keep-alive timeouts, and (if at least one device was fully provisioned) subscribe to the Zigbee packet stream.
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `DEVICE_MAC_ADDRESS_1` | No | _(none)_ | MAC address of the first device to auto-provision, e.g. `aa:bb:cc:dd:ee:ff:11:22` |
-| `DEVICE_MAC_ADDRESS_2` | No | _(none)_ | MAC address of the second device to auto-provision |
-| `DEVICE_MAC_ADDRESS_3` | No | _(none)_ | MAC address of the third device to auto-provision |
-| `DEVICE_MAC_ADDRESS_4` | No | _(none)_ | MAC address of the fourth device to auto-provision |
-| `DEVICE_MAC_ADDRESS_5` | No | _(none)_ | MAC address of the fifth device to auto-provision |
-
-> **Note:** If none of these variables are set, provisioning is skipped entirely and `provision_no_mac_addresses_configured` is logged.
-> **Provisioning order per device:** `UpdateDeviceClass` → `SetDeviceID` → `SetOfflineTimeout (1440 min)` → `SetTimeoutValue (TIMEOUT_INFINITE)`. `SetDeviceID` is only called after `UpdateDeviceClass` succeeds, because the gateway requires the class to exist before a class-scoped device ID can be assigned.
 
 ### App / Server
 
@@ -392,11 +374,15 @@ Alternative using params:
 
 ### 14) zigbee_subscribe_packet_stream
 
+Supported `fields` values for Zigbee packet stream are currently:
+
+- `DeviceClass`
+
 ```json
 {
   "request_id": "req-zb-subscribe-stream-001",
   "action": "zigbee_subscribe_packet_stream",
-  "fields": ["DeviceClass", "DeviceInfo"]
+  "fields": ["DeviceClass"]
 }
 ```
 Alternative using params:
@@ -406,7 +392,7 @@ Alternative using params:
   "request_id": "req-zb-subscribe-stream-002",
   "action": "zigbee_subscribe_packet_stream",
   "params": {
-    "fields": ["DeviceClass", "DeviceInfo"]
+    "fields": ["DeviceClass"]
   }
 }
 ```

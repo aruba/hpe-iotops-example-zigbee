@@ -120,7 +120,7 @@ func run() int {
 				log.Warn("gateway_startup_steps_skipped",
 					"reason", "connectivity check failed",
 					"max_wait_seconds", 45,
-					"skipped_steps", []string{"get_devices", "get_unclassified_devices", "provision_discovered_devices", "provision_configured_macs", "start_app_info_reporter"},
+					"skipped_steps", []string{"get_devices", "get_unclassified_devices", "start_app_info_reporter"},
 				)
 				return
 			}
@@ -145,72 +145,53 @@ func run() int {
 			startupAPICancel()
 
 			discoveredSet := make(map[string]struct{})
-			discoveredOrdered := make([]string, 0)
+			discoveredMACs := make([]string, 0)
+
 			if devicesErr == nil && devicesResp != nil {
 				for _, d := range devicesResp.Devices {
 					mac := strings.TrimSpace(d.Mac)
 					if mac == "" {
 						continue
 					}
-					key := strings.ToLower(mac)
-					if _, exists := discoveredSet[key]; !exists {
-						discoveredSet[key] = struct{}{}
-						discoveredOrdered = append(discoveredOrdered, mac)
+					k := strings.ToLower(mac)
+					if _, exists := discoveredSet[k]; exists {
+						continue
 					}
+					discoveredSet[k] = struct{}{}
+					discoveredMACs = append(discoveredMACs, mac)
 				}
 			}
+
 			if unclassifiedErr == nil && unclassifiedResp != nil {
 				for _, d := range unclassifiedResp.Devices {
 					mac := strings.TrimSpace(d.Mac)
 					if mac == "" {
 						continue
 					}
-					key := strings.ToLower(mac)
-					if _, exists := discoveredSet[key]; !exists {
-						discoveredSet[key] = struct{}{}
-						discoveredOrdered = append(discoveredOrdered, mac)
+					k := strings.ToLower(mac)
+					if _, exists := discoveredSet[k]; exists {
+						continue
 					}
+					discoveredSet[k] = struct{}{}
+					discoveredMACs = append(discoveredMACs, mac)
 				}
 			}
 
-			configuredMACs := []string{
-				cfg.App.DeviceMacAddress1,
-				cfg.App.DeviceMacAddress2,
-				cfg.App.DeviceMacAddress3,
-				cfg.App.DeviceMacAddress4,
-				cfg.App.DeviceMacAddress5,
+			if len(discoveredMACs) == 0 {
+				log.Info("gateway_discovered_devices_empty",
+					"source_calls", []string{"zigbee_get_devices", "zigbee_get_devices_unclassified"},
+					"result", "no devices to provision",
+				)
+			} else {
+				log.Info("gateway_discovered_devices_ready_for_provisioning",
+					"count", len(discoveredMACs),
+					"devices", discoveredMACs,
+				)
+				go provisionDiscoveredDevices(ctx, log, gwClient, append([]string(nil), discoveredMACs...))
 			}
 
 			// Report app liveness to the gateway every minute using /api/v3/apps/info.
 			go appInfoReporter(ctx, log, gwClient)
-
-			// Provisioning can involve many network calls; run it asynchronously so
-			// HTTP startup is never delayed enough to trip Kubernetes probes.
-			go func(discovered, configured []string) {
-				// First provision discovered devices.
-				if len(discovered) == 0 {
-					log.Warn("provision_discovered_devices_skipped",
-						"reason", "no devices returned by get_devices/get_unclassified_devices",
-					)
-				} else {
-					provisionMacDevices(ctx, log, gwClient, discovered, "discovered_devices")
-				}
-
-				// Then provision explicitly configured MAC addresses (if present).
-				hasConfiguredMAC := false
-				for _, m := range configured {
-					if strings.TrimSpace(m) != "" {
-						hasConfiguredMAC = true
-						break
-					}
-				}
-				if hasConfiguredMAC {
-					provisionMacDevices(ctx, log, gwClient, configured, "configured_env")
-				} else {
-					log.Info("provision_no_mac_addresses_configured",
-						"reason", "none of DEVICE_MAC_ADDRESS_1..5 are set; skipping configured MAC provisioning")
-				}
-			}(append([]string(nil), discoveredOrdered...), append([]string(nil), configuredMACs...))
 		}()
 	} else {
 		log.Info("zigbee_gateway_disabled", "reason", "APIGW_URL not set; set APIGW_URL and APIKEY to enable")
@@ -392,137 +373,124 @@ func northboundStatusPublisher(ctx context.Context, log *slog.Logger, mqttClient
 	}
 }
 
-// provisionMacDevices iterates over a list of device MAC addresses.
-// For each non-empty MAC it:
-//  1. Calls UpdateDeviceClass to assign class ["Aqara"] to that device.
-//  2. On success, calls SetDeviceID with device class "Aqara" and deviceId "<mac>_chinmay_<random>".
-//  3. On success, calls SetOfflineTimeout to 1440 minutes for that device.
-//  4. On success, calls SetTimeoutValue to TIMEOUT_INFINITE for that device.
+// provisionDiscoveredDevices applies startup provisioning to devices discovered
+// from gateway get-calls.
+// For each MAC address it attempts:
+//  1. UpdateDeviceClass to ["aqara"]
+//  2. SetDeviceID with class "aqara" and id format "<mac>_chinmay_<random>"
 //
-// SubscribePacketStream is called once after all devices are processed, but only
-// if at least one device had both its class and device ID set successfully.
-func provisionMacDevices(ctx context.Context, log *slog.Logger, gw *zigbee.GatewayClient, macs []string, source string) {
-	fullyProvisioned := 0
+// After all devices are processed, it subscribes to packet stream only if at
+// least one device completed both steps.
+func provisionDiscoveredDevices(ctx context.Context, log *slog.Logger, gw *zigbee.GatewayClient, macs []string) {
+	const deviceClass = "aqara"
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	total := len(macs)
+	classSuccess := 0
+	deviceIDSuccess := 0
+
+	log.Info("startup_discovered_provisioning_started",
+		"total_devices", total,
+		"device_class", deviceClass,
+	)
 
 	for i, mac := range macs {
 		mac = strings.TrimSpace(mac)
 		if mac == "" {
-			continue
-		}
-		targetLabel := source + "_index_" + strconv.Itoa(i+1)
-		if source == "configured_env" {
-			targetLabel = "DEVICE_MAC_ADDRESS_" + strconv.Itoa(i+1)
-		}
-		deviceID := mac + "_chinmay_" + strconv.Itoa(rand.Intn(1_000_000))
-
-		provCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		_, err := gw.UpdateDeviceClass(provCtx, mac, zigbee.DeviceClassArray{DeviceClass: []string{"Aqara"}})
-		cancel()
-		if err != nil {
-			log.Warn("provision_set_device_class_failed",
-				"target", targetLabel,
-				"source", source,
-				"mac", mac,
-				"error", err,
+			log.Warn("startup_provision_device_skipped",
+				"index", i,
+				"reason", "empty_mac",
 			)
 			continue
 		}
-		log.Info("provision_set_device_class_ok",
-			"target", targetLabel,
-			"source", source,
+
+		deviceID := mac + "_chinmay_" + strconv.Itoa(rng.Intn(1_000_000))
+		log.Info("startup_provision_device_attempt",
+			"index", i,
 			"mac", mac,
-			"device_class", "Aqara",
+			"target_device_id", deviceID,
+			"target_device_class", deviceClass,
 		)
 
-		provCtx2, cancel2 := context.WithTimeout(ctx, 15*time.Second)
-		_, err = gw.SetDeviceID(provCtx2, mac, "Aqara", zigbee.DeviceClassScopedData{
-			DeviceClass: "Aqara",
+		classCtx, classCancel := context.WithTimeout(ctx, 15*time.Second)
+		_, classErr := gw.UpdateDeviceClass(classCtx, mac, zigbee.DeviceClassArray{DeviceClass: []string{deviceClass}})
+		classCancel()
+		if classErr != nil {
+			log.Warn("startup_provision_set_device_class_failed",
+				"index", i,
+				"mac", mac,
+				"device_class", deviceClass,
+				"error", classErr,
+			)
+			continue
+		}
+		classSuccess++
+		log.Info("startup_provision_set_device_class_ok",
+			"index", i,
+			"mac", mac,
+			"device_class", deviceClass,
+		)
+
+		idCtx, idCancel := context.WithTimeout(ctx, 15*time.Second)
+		_, idErr := gw.SetDeviceID(idCtx, mac, deviceClass, zigbee.DeviceClassScopedData{
+			DeviceClass: deviceClass,
 			DeviceID:    deviceID,
 		})
-		cancel2()
-		if err != nil {
-			log.Warn("provision_set_device_id_failed",
-				"target", targetLabel,
-				"source", source,
+		idCancel()
+		if idErr != nil {
+			log.Warn("startup_provision_set_device_id_failed",
+				"index", i,
 				"mac", mac,
+				"device_class", deviceClass,
 				"device_id", deviceID,
-				"error", err,
+				"error", idErr,
 			)
 			continue
 		}
-		log.Info("provision_set_device_id_ok",
-			"target", targetLabel,
-			"source", source,
+		deviceIDSuccess++
+		log.Info("startup_provision_set_device_id_ok",
+			"index", i,
 			"mac", mac,
+			"device_class", deviceClass,
 			"device_id", deviceID,
 		)
-
-		// Both class and device ID succeeded — count this device as fully provisioned.
-		fullyProvisioned++
-
-		// Set offline timeout to the maximum allowed value (1440 minutes = 24 hours).
-		provCtx3, cancel3 := context.WithTimeout(ctx, 15*time.Second)
-		_, err = gw.SetOfflineTimeout(provCtx3, mac, "", "Aqara", zigbee.OfflineTimeoutData{TimeoutMinutes: 1440})
-		cancel3()
-		if err != nil {
-			log.Warn("provision_set_offline_timeout_failed",
-				"target", targetLabel,
-				"source", source,
-				"mac", mac,
-				"timeout_minutes", 1440,
-				"error", err,
-			)
-		} else {
-			log.Info("provision_set_offline_timeout_ok",
-				"target", targetLabel,
-				"source", source,
-				"mac", mac,
-				"timeout_minutes", 1440,
-			)
-		}
-
-		// Set keep-alive timeout to TIMEOUT_INFINITE so the device is never expired.
-		provCtx4, cancel4 := context.WithTimeout(ctx, 15*time.Second)
-		_, err = gw.SetTimeoutValue(provCtx4, mac, "", "Aqara", zigbee.TimeoutValueData{Timeout: "TIMEOUT_INFINITE"})
-		cancel4()
-		if err != nil {
-			log.Warn("provision_set_timeout_value_failed",
-				"target", targetLabel,
-				"source", source,
-				"mac", mac,
-				"timeout", "TIMEOUT_INFINITE",
-				"error", err,
-			)
-		} else {
-			log.Info("provision_set_timeout_value_ok",
-				"target", targetLabel,
-				"source", source,
-				"mac", mac,
-				"timeout", "TIMEOUT_INFINITE",
-			)
-		}
 	}
 
-	// Only subscribe to the packet stream if at least one device was fully provisioned
-	// (both class and device ID set successfully).
-	if fullyProvisioned == 0 {
-		log.Info("provision_subscribe_packet_stream_skipped",
-			"reason", "no devices were fully provisioned (class + device ID)",
+	log.Info("startup_discovered_provisioning_completed",
+		"total_devices", total,
+		"set_device_class_success", classSuccess,
+		"set_device_id_success", deviceIDSuccess,
+	)
+
+	if deviceIDSuccess == 0 {
+		log.Warn("startup_subscribe_packet_stream_skipped",
+			"reason", "no device completed class+device_id setup",
+			"total_devices", total,
 		)
 		return
 	}
 
 	streamCtx, streamCancel := context.WithTimeout(ctx, 15*time.Second)
-	streamResp, err := gw.SubscribePacketStream(streamCtx, nil)
+	streamResp, streamErr := gw.SubscribePacketStream(streamCtx, []string{"DeviceClass", "DeviceInfo"})
 	streamCancel()
-	if err != nil {
-		log.Warn("provision_subscribe_packet_stream_failed", "error", err)
-	} else {
-		log.Info("provision_subscribe_packet_stream_ok",
-			"fully_provisioned_devices", fullyProvisioned,
-			"packets_buffered", len(streamResp.Packets),
+	if streamErr != nil {
+		log.Warn("startup_subscribe_packet_stream_failed",
+			"provisioned_devices", deviceIDSuccess,
+			"fields", []string{"DeviceClass", "DeviceInfo"},
+			"error", streamErr,
 		)
+		return
 	}
+
+	packetsBuffered := 0
+	if streamResp != nil {
+		packetsBuffered = len(streamResp.Packets)
+	}
+	log.Info("startup_subscribe_packet_stream_ok",
+		"provisioned_devices", deviceIDSuccess,
+		"fields", []string{"DeviceClass", "DeviceInfo"},
+		"packets_buffered", packetsBuffered,
+	)
 }
 
 // ensureGatewayConnectivity attempts to reach the gateway with exponential backoff.

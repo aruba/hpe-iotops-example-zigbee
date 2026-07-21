@@ -59,14 +59,6 @@ type MQTTConfig struct {
 type AppConfig struct {
 	LogLevel              string `yaml:"log_level"`
 	StatusIntervalSeconds int    `yaml:"status_interval_seconds"`
-	// DeviceMacAddress1..5 are optional Zigbee device MAC addresses (env: DEVICE_MAC_ADDRESS_1..5).
-	// When set, the app will provision each device after connecting to the gateway by
-	// calling SetDeviceID and UpdateDeviceClass with device class "Aqara".
-	DeviceMacAddress1 string `yaml:"device_mac_address_1"`
-	DeviceMacAddress2 string `yaml:"device_mac_address_2"`
-	DeviceMacAddress3 string `yaml:"device_mac_address_3"`
-	DeviceMacAddress4 string `yaml:"device_mac_address_4"`
-	DeviceMacAddress5 string `yaml:"device_mac_address_5"`
 }
 
 // Default returns safe, useful defaults so the app can run with minimal setup.
@@ -196,11 +188,6 @@ func applyEnvOverrides(cfg *Config) {
 
 	setString(&cfg.App.LogLevel, "LOG_LEVEL")
 	setInt(&cfg.App.StatusIntervalSeconds, "APP_STATUS_INTERVAL_SECONDS")
-	setString(&cfg.App.DeviceMacAddress1, "DEVICE_MAC_ADDRESS_1")
-	setString(&cfg.App.DeviceMacAddress2, "DEVICE_MAC_ADDRESS_2")
-	setString(&cfg.App.DeviceMacAddress3, "DEVICE_MAC_ADDRESS_3")
-	setString(&cfg.App.DeviceMacAddress4, "DEVICE_MAC_ADDRESS_4")
-	setString(&cfg.App.DeviceMacAddress5, "DEVICE_MAC_ADDRESS_5")
 
 	// Aruba IoT Gateway environment variables (injected by the container platform).
 	setString(&cfg.Gateway.APIGWURL, "APIGW_URL")
