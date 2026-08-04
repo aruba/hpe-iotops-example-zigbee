@@ -7,6 +7,12 @@ Containerized IoT app with:
 - Structured JSON logs to stdout
 - Periodic app status log every 60 seconds
 
+## Prerequisites
+
+1. Follow the instructions in the App Developer Portal documentation and the Aruba Central documentation to set up your IoT Connectors, radio and Zigbee service profile configurations, Zigbee end devices, and access points (Zigbee Coordinator).  
+  
+2. Set up your MQTT endpoint server, topics, and related configuration (optional).
+
 ## General Code Flow
 
 This section explains what happens from startup to shutdown in simple steps.
